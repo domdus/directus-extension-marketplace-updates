@@ -1,0 +1,62 @@
+{
+	"name": "directus-extension-marketplace-updates",
+	"description": "Check and apply updates for Directus extensions installed from the Marketplace",
+	"icon": "system_update",
+	"version": "1.0.0",
+	"license": "MIT",
+	"keywords": [
+		"directus",
+		"directus-extension",
+		"directus-extension-bundle",
+		"marketplace",
+		"extensions",
+		"updates",
+		"registry"
+	],
+	"type": "module",
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/domdus/directus-extension-marketplace-updates.git"
+	},
+	"bugs": {
+		"url": "https://github.com/domdus/directus-extension-marketplace-updates/issues"
+	},
+	"homepage": "https://github.com/domdus/directus-extension-marketplace-updates#readme",
+	"directus:extension": {
+		"type": "bundle",
+		"path": {
+			"app": "dist/app.js",
+			"api": "dist/api.js"
+		},
+		"entries": [
+			{
+				"type": "module",
+				"name": "extension-updates",
+				"source": "src/module/index.ts"
+			},
+			{
+				"type": "endpoint",
+				"name": "extension-updates-endpoint",
+				"source": "src/endpoint/index.ts"
+			}
+		],
+		"host": ">=10.10.0 <13.0.0"
+	},
+	"scripts": {
+		"build": "directus-extension build",
+		"dev": "directus-extension build -w --no-minify",
+		"link": "directus-extension link",
+		"add": "directus-extension add"
+	},
+	"devDependencies": {
+		"@directus/extensions-sdk": "^17.0.0",
+		"@directus/types": "^13.0.0",
+		"typescript": "^5.0.0",
+		"vue": "^3.3.7"
+	}
+}
