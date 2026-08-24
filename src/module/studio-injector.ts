@@ -9,6 +9,7 @@ const ENDPOINT_PATH = '/extension-updates/check';
 type CheckPayload = {
 	update_count?: number;
 	host_mismatch_count?: number;
+	host_version?: string | null;
 };
 
 function getVueApp(): any {
@@ -68,6 +69,14 @@ function isSettingsModule(): boolean {
 
 function isExtensionsList(): boolean {
 	return /\/settings\/extensions\/?$/.test(window.location.pathname.replace(/\/+$/, ''));
+}
+
+function isMarketplaceSettings(): boolean {
+	return /\/settings\/marketplace(\/|$)/.test(window.location.pathname.replace(/\/+$/, ''));
+}
+
+function isBannerPage(): boolean {
+	return isExtensionsList() || isMarketplaceSettings();
 }
 
 function isUpdatesPage(): boolean {
@@ -140,6 +149,42 @@ function listAlreadyHasUpdatesLink(list: Element | null): boolean {
 	});
 }
 
+function getRouter(): any {
+	try {
+		return getVueApp()?.config?.globalProperties?.$router || null;
+	} catch {
+		return null;
+	}
+}
+
+function updatesPath(): string {
+	return `${adminBase()}/extension-updates`;
+}
+
+function navigateToUpdates(event?: Event): void {
+	event?.preventDefault();
+	event?.stopPropagation();
+	const router = getRouter();
+	if (router?.push) {
+		void router.push('/extension-updates');
+		return;
+	}
+	window.location.assign(updatesPath());
+}
+
+function wireSpaNavigation(root: HTMLElement): void {
+	const targets: HTMLElement[] = [];
+	if (root.tagName === 'A') targets.push(root);
+	root.querySelectorAll('a').forEach((anchor) => targets.push(anchor as HTMLElement));
+	if (!targets.length) {
+		root.addEventListener('click', navigateToUpdates);
+		return;
+	}
+	for (const target of targets) {
+		target.addEventListener('click', navigateToUpdates);
+	}
+}
+
 function injectSettingsNav(): void {
 	// This page already renders Marketplace / Extensions / Extension Updates in Vue.
 	// Only inject into native Settings navigation.
@@ -164,7 +209,7 @@ function injectSettingsNav(): void {
 
 	const clone = extensionsLink.cloneNode(true) as HTMLElement;
 	clone.setAttribute(NAV_ATTR, '1');
-	const href = `${adminBase()}/extension-updates`;
+	const href = updatesPath();
 	if (clone.tagName === 'A') {
 		clone.setAttribute('href', href);
 	}
@@ -186,6 +231,7 @@ function injectSettingsNav(): void {
 	setLinkActive(clone, false);
 	setLinkActive(extensionsLink, /\/settings\/extensions\/?$/.test(window.location.pathname));
 
+	wireSpaNavigation(clone);
 	extensionsLink.parentElement?.insertBefore(clone, extensionsLink.nextSibling);
 }
 
@@ -210,10 +256,36 @@ async function loadUpdateCount(): Promise<CheckPayload | null> {
 		const res = await fetch(url, { headers: getAuthHeaders(), credentials: 'same-origin' });
 		if (!res.ok) return null;
 		const json = await res.json();
-		return json?.data || null;
+		const data = json?.data;
+		if (!data || typeof data !== 'object') return null;
+		return {
+			update_count: data.update_count,
+			host_mismatch_count: data.host_mismatch_count,
+			host_version: data.host_version,
+		};
 	} catch {
 		return null;
 	}
+}
+
+function formatSummary(data: CheckPayload): string {
+	const parts: string[] = [];
+	const count = Number(data.update_count || 0);
+	if (count) {
+		parts.push(count === 1 ? '1 Marketplace update available' : `${count} Marketplace updates available`);
+	}
+	const mismatch = Number(data.host_mismatch_count || 0);
+	if (mismatch) {
+		parts.push(
+			mismatch === 1
+				? '1 newer release needs a newer Directus'
+				: `${mismatch} newer releases need a newer Directus`,
+		);
+	}
+	if (data.host_version) {
+		parts.push(`Directus ${data.host_version}`);
+	}
+	return parts.join(' · ');
 }
 
 let bannerInflight = false;
@@ -221,7 +293,7 @@ let bannerCheckedAt = 0;
 let bannerEmpty = false;
 
 async function injectBanner(): Promise<void> {
-	if (!isExtensionsList()) {
+	if (!isBannerPage()) {
 		removeBanner();
 		return;
 	}
@@ -232,9 +304,9 @@ async function injectBanner(): Promise<void> {
 	try {
 		const data = await loadUpdateCount();
 		bannerCheckedAt = Date.now();
-		if (!isExtensionsList()) return;
+		if (!isBannerPage()) return;
 		const count = Number(data?.update_count || 0);
-		if (!count) {
+		if (!count || !data) {
 			bannerEmpty = true;
 			removeBanner();
 			return;
@@ -245,8 +317,10 @@ async function injectBanner(): Promise<void> {
 		const el = document.createElement('div');
 		el.setAttribute(BANNER_ATTR, '1');
 		el.className = 'eu-ext-banner';
-		const label = count === 1 ? '1 marketplace update available' : `${count} marketplace updates available`;
-		el.innerHTML = `<span>${label}.</span><a href="${adminBase()}/extension-updates">Review updates</a>`;
+		const label = formatSummary(data);
+		el.innerHTML = `<span>${label}</span><a href="${updatesPath()}">Review updates</a>`;
+		const review = el.querySelector('a');
+		if (review) review.addEventListener('click', navigateToUpdates);
 		host.insertBefore(el, host.firstChild);
 	} finally {
 		bannerInflight = false;
@@ -258,7 +332,7 @@ function sync(): void {
 	ensureStyles();
 	injectSettingsNav();
 	void injectBanner();
-	if (!isExtensionsList()) removeBanner();
+	if (!isBannerPage()) removeBanner();
 }
 
 export function installStudioInjector(): void {

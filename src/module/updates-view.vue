@@ -24,7 +24,17 @@
 			</p>
 
 			<div class="actions">
-				<v-button secondary :loading="checking" @click="load(true)">Check now</v-button>
+				<v-button secondary :loading="checking" :disabled="updatingAll" @click="load(true)">
+					Check now
+				</v-button>
+				<v-button
+					v-if="updateTargets.length"
+					:loading="updatingAll"
+					:disabled="checking || Boolean(applyingId)"
+					@click="confirmUpdateAll"
+				>
+					Update all
+				</v-button>
 			</div>
 
 			<div v-if="errorMessage" class="result">
@@ -38,6 +48,13 @@
 						available
 					</template>
 					<template v-else>All marketplace extensions are up to date</template>
+					<template v-if="summary.host_mismatch_count">
+						· {{ summary.host_mismatch_count }} newer release<template
+							v-if="summary.host_mismatch_count !== 1"
+							>s</template
+						>
+						need a newer Directus
+					</template>
 					<template v-if="summary.host_version">
 						· Directus {{ summary.host_version }}
 					</template>
@@ -76,7 +93,7 @@
 						v-if="item.has_update"
 						small
 						:loading="applyingId === item.id"
-						:disabled="Boolean(applyingId)"
+						:disabled="checking || updatingAll || Boolean(applyingId)"
 						@click="confirmUpdate(item)"
 					>
 						Update
@@ -110,12 +127,50 @@
 			</v-card>
 		</v-dialog>
 
+		<v-dialog v-model="confirmAllOpen" @esc="!updatingAll && (confirmAllOpen = false)">
+			<v-card>
+				<v-card-title>
+					Update {{ updateTargets.length }} extension<template v-if="updateTargets.length !== 1"
+						>s</template
+					>?
+				</v-card-title>
+				<v-card-text>
+					<p>
+						Each extension is uninstalled and reinstalled at its latest marketplace version, one at a
+						time. Config in project settings is kept. The Data Studio will need a reload afterwards.
+					</p>
+					<p v-if="updateTargets.some((item) => item.host_mismatch)" class="dialog-note">
+						Some releases declare a host range that does not match this Directus. Publishers often
+						leave that field outdated — proceed if you trust those releases.
+					</p>
+					<p v-if="updateTargets.some((item) => item.is_self)" class="dialog-note">
+						This checker is included and will be applied last.
+					</p>
+				</v-card-text>
+				<v-card-actions>
+					<v-button secondary :disabled="updatingAll" @click="confirmAllOpen = false">Cancel</v-button>
+					<v-button :loading="updatingAll" @click="runUpdateAll">Update all</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
 		<v-dialog v-model="reloadOpen" @esc="reloadOpen = false">
 			<v-card>
 				<v-card-title>Reload required</v-card-title>
 				<v-card-text>
-					{{ pending?.name || 'The extension' }} was updated to {{ appliedVersion }}. Reload the Data
-					Studio to load the new version.
+					<template v-if="bulkResult">
+						Updated {{ bulkResult.succeeded }} extension<template v-if="bulkResult.succeeded !== 1"
+							>s</template
+						>.
+						<template v-if="bulkResult.failed">
+							{{ bulkResult.failed }} failed.
+						</template>
+						Reload the Data Studio to load the new versions.
+					</template>
+					<template v-else>
+						{{ pending?.name || 'The extension' }} was updated to {{ appliedVersion }}. Reload the
+						Data Studio to load the new version.
+					</template>
 				</v-card-text>
 				<v-card-actions>
 					<v-button secondary @click="reloadOpen = false">Later</v-button>
@@ -142,18 +197,28 @@ const serverStore = useServerStore();
 
 const checking = ref(false);
 const applyingId = ref<string | null>(null);
+const updatingAll = ref(false);
 const errorMessage = ref<string | null>(null);
 const summary = ref<UpdateCheckResponse | null>(null);
 const items = ref<ExtensionUpdateItem[]>([]);
 const confirmOpen = ref(false);
+const confirmAllOpen = ref(false);
 const reloadOpen = ref(false);
 const pending = ref<ExtensionUpdateItem | null>(null);
 const appliedVersion = ref('');
+const bulkResult = ref<{ succeeded: number; failed: number } | null>(null);
 
 const summaryType = computed(() => {
 	if (!summary.value) return 'info';
 	if (summary.value.update_count) return 'warning';
 	return 'success';
+});
+
+const updateTargets = computed(() => {
+	const pendingItems = items.value.filter((item) => item.has_update && !item.error);
+	const others = pendingItems.filter((item) => !item.is_self);
+	const self = pendingItems.filter((item) => item.is_self);
+	return [...others, ...self];
 });
 
 function formatType(type: string) {
@@ -185,8 +250,23 @@ async function load(force = false) {
 }
 
 function confirmUpdate(item: ExtensionUpdateItem) {
+	bulkResult.value = null;
 	pending.value = item;
 	confirmOpen.value = true;
+}
+
+function confirmUpdateAll() {
+	if (!updateTargets.value.length) return;
+	bulkResult.value = null;
+	confirmAllOpen.value = true;
+}
+
+async function applyOne(item: ExtensionUpdateItem) {
+	const res = await api.post('/extension-updates/apply', {
+		extension: item.id,
+		host: hostParam(),
+	});
+	return res.data?.data?.to_version || item.latest_version || '';
 }
 
 async function runUpdate() {
@@ -194,13 +274,10 @@ async function runUpdate() {
 	if (!item) return;
 	applyingId.value = item.id;
 	errorMessage.value = null;
+	bulkResult.value = null;
 	try {
-		const res = await api.post('/extension-updates/apply', {
-			extension: item.id,
-			host: hostParam(),
-		});
+		appliedVersion.value = await applyOne(item);
 		confirmOpen.value = false;
-		appliedVersion.value = res.data?.data?.to_version || item.latest_version || '';
 		reloadOpen.value = true;
 		await load(true);
 	} catch (error: any) {
@@ -209,6 +286,54 @@ async function runUpdate() {
 		confirmOpen.value = false;
 	} finally {
 		applyingId.value = null;
+	}
+}
+
+async function runUpdateAll() {
+	const queue = [...updateTargets.value];
+	if (!queue.length) {
+		confirmAllOpen.value = false;
+		return;
+	}
+
+	updatingAll.value = true;
+	errorMessage.value = null;
+	let succeeded = 0;
+	let failed = 0;
+	let lastError: string | null = null;
+
+	try {
+		for (const item of queue) {
+			applyingId.value = item.id;
+			try {
+				await applyOne(item);
+				succeeded += 1;
+			} catch (error: any) {
+				failed += 1;
+				lastError =
+					error?.response?.data?.errors?.[0]?.message || error?.message || 'Update failed';
+				break;
+			}
+		}
+	} finally {
+		applyingId.value = null;
+		updatingAll.value = false;
+		confirmAllOpen.value = false;
+	}
+
+	await load(true);
+
+	if (succeeded) {
+		bulkResult.value = { succeeded, failed };
+		pending.value = null;
+		appliedVersion.value = '';
+		reloadOpen.value = true;
+	}
+	if (failed && lastError) {
+		errorMessage.value =
+			succeeded > 0
+				? `Stopped after ${succeeded} update${succeeded === 1 ? '' : 's'}: ${lastError}`
+				: lastError;
 	}
 }
 
