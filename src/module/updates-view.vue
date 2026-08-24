@@ -12,7 +12,7 @@
 			<sidebar-detail id="about" icon="info" title="About">
 				<p class="sidebar-text">
 					This page compares registry-installed extensions with the marketplace and applies updates by
-					uninstalling the current version, then installing the latest compatible release.
+					uninstalling the current version, then installing the latest marketplace release.
 				</p>
 			</sidebar-detail>
 		</template>
@@ -38,10 +38,6 @@
 						available
 					</template>
 					<template v-else>All marketplace extensions are up to date</template>
-					<template v-if="summary.incompatible_count">
-						· {{ summary.incompatible_count }} newer release<template v-if="summary.incompatible_count !== 1">s</template>
-						need a newer Directus
-					</template>
 					<template v-if="summary.host_version">
 						· Directus {{ summary.host_version }}
 					</template>
@@ -60,23 +56,19 @@
 						<strong>{{ item.name }}</strong>
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
 						<v-chip v-if="item.has_update" small class="state warning">Update</v-chip>
-						<v-chip v-else-if="item.incompatible_update" small class="state warning">Needs Directus</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else small class="state enabled">Up to date</v-chip>
 					</div>
 					<p class="ext-meta">
 						Installed {{ item.current_version }}
-						<template v-if="item.latest_compatible_version">
-							· Latest compatible {{ item.latest_compatible_version }}
-						</template>
-						<template v-else-if="item.latest_version">
+						<template v-if="item.latest_version">
 							· Latest {{ item.latest_version }}
 						</template>
 						<template v-if="item.is_self"> · This checker</template>
 					</p>
 					<p v-if="item.error" class="ext-error">{{ item.error }}</p>
-					<p v-else-if="item.incompatible_update && item.host_version" class="ext-error">
-						{{ item.latest_version }} requires Directus {{ item.host_version }}.
+					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
+						Declared host range {{ item.host_version }} (often outdated — update still allowed).
 					</p>
 				</div>
 				<div class="ext-actions">
@@ -100,8 +92,12 @@
 				<v-card-text>
 					<p>
 						This uninstalls {{ pending?.current_version }} and installs
-						{{ pending?.latest_compatible_version }}. Config stored in project settings is kept.
+						{{ pending?.latest_version }}. Config stored in project settings is kept.
 						The Data Studio will need a reload afterwards.
+					</p>
+					<p v-if="pending?.host_mismatch && pending?.host_version" class="dialog-note">
+						Marketplace lists host range {{ pending.host_version }}, which does not match this
+						Directus. Publishers often leave that field outdated — proceed if you trust the release.
 					</p>
 					<p v-if="pending?.is_self" class="dialog-note">
 						This is the update checker itself. Apply it last if other extensions also have updates.
@@ -157,7 +153,6 @@ const appliedVersion = ref('');
 const summaryType = computed(() => {
 	if (!summary.value) return 'info';
 	if (summary.value.update_count) return 'warning';
-	if (summary.value.incompatible_count) return 'warning';
 	return 'success';
 });
 
@@ -205,7 +200,7 @@ async function runUpdate() {
 			host: hostParam(),
 		});
 		confirmOpen.value = false;
-		appliedVersion.value = res.data?.data?.to_version || item.latest_compatible_version || '';
+		appliedVersion.value = res.data?.data?.to_version || item.latest_version || '';
 		reloadOpen.value = true;
 		await load(true);
 	} catch (error: any) {
@@ -283,7 +278,8 @@ onMounted(() => {
 }
 
 .ext-meta,
-.ext-error {
+.ext-error,
+.ext-note {
 	margin: 6px 0 0;
 	font-size: 13px;
 	line-height: 1.45;
@@ -293,6 +289,10 @@ onMounted(() => {
 
 .ext-error {
 	color: var(--theme--warning);
+}
+
+.ext-note {
+	color: var(--theme--foreground-subdued);
 }
 
 .ext-actions {

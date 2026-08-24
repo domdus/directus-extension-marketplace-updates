@@ -8,7 +8,7 @@ const ENDPOINT_PATH = '/extension-updates/check';
 
 type CheckPayload = {
 	update_count?: number;
-	incompatible_count?: number;
+	host_mismatch_count?: number;
 };
 
 function getVueApp(): any {

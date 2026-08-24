@@ -9,7 +9,7 @@ Open **Settings → Extension Updates** (admins only). A notice also appears on 
 ## Features
 
 - Lists every extension installed with `source: registry` (marketplace)
-- Compares the installed semver with the latest **host-compatible** marketplace version
+- Compares the installed semver with the latest marketplace version
 - Updates one extension at a time: uninstall, then install the new version UUID
 - Restores a disabled state after update, and rolls back to the previous version UUID if install fails
 - Skips local folder and npm (`node_modules`) installs — those are not marketplace-updatable
@@ -46,7 +46,7 @@ npm run build
 ## Notes
 
 - Latest **npm** and latest **marketplace** can differ. Apply always uses the marketplace version UUID, not npm.
-- If a newer release exists but its `host_version` does not match this Directus, it is shown as needing a newer Directus — not as an Update button.
+- Declared marketplace `host_version` ranges are **advisory only**. Publishers often leave them outdated, so a mismatch does not block Update.
 - Updating this checker itself unloads its API mid-flight in theory; the handler stays in memory for the request, then you must reload. Apply other extensions first when both need updates.
 
 ## License

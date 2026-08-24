@@ -83,9 +83,8 @@ function sortItems(items: ExtensionUpdateItem[]): ExtensionUpdateItem[] {
 	const rank = (item: ExtensionUpdateItem) => {
 		if (item.has_update && item.is_self) return 1;
 		if (item.has_update) return 0;
-		if (item.incompatible_update) return 2;
-		if (item.error) return 3;
-		return 4;
+		if (item.error) return 2;
+		return 3;
 	};
 	return [...items].sort((a, b) => {
 		const diff = rank(a) - rank(b);
@@ -140,11 +139,9 @@ export async function checkMarketplaceUpdates(options: {
 			current_version_id: currentVersionId,
 			latest_version: null,
 			latest_version_id: null,
-			latest_compatible_version: null,
-			latest_compatible_version_id: null,
 			host_version: null,
 			has_update: false,
-			incompatible_update: false,
+			host_mismatch: false,
 			is_self: isSelf(entry),
 			marketplace_path: `/settings/marketplace/extension/${entry.id}`,
 		};
@@ -159,29 +156,21 @@ export async function checkMarketplaceUpdates(options: {
 			if (installedRelease?.version) currentVersion = installedRelease.version;
 			base.current_version = currentVersion;
 
+			// Always target the newest marketplace release. Declared host_version ranges are
+			// often outdated and must not block updates.
 			const latest = versions[0] || null;
 			if (latest) {
 				base.latest_version = latest.version;
 				base.latest_version_id = latest.id;
 				base.host_version = latest.host_version || null;
-			}
-
-			const compatible = versions.find((version) =>
-				hostVersion ? versionSatisfies(hostVersion, version.host_version) : true,
-			);
-			if (compatible) {
-				base.latest_compatible_version = compatible.version;
-				base.latest_compatible_version_id = compatible.id;
-				base.host_version = compatible.host_version || base.host_version;
 				if (currentVersion !== 'unknown') {
-					base.has_update = compareSemver(compatible.version, currentVersion) > 0;
+					base.has_update = compareSemver(latest.version, currentVersion) > 0;
 				} else {
-					base.has_update = compatible.id !== currentVersionId;
+					base.has_update = latest.id !== currentVersionId;
 				}
-			}
-
-			if (!base.has_update && latest && currentVersion !== 'unknown' && compareSemver(latest.version, currentVersion) > 0) {
-				base.incompatible_update = true;
+				if (hostVersion && latest.host_version) {
+					base.host_mismatch = !versionSatisfies(hostVersion, latest.host_version);
+				}
 			}
 		} catch (error: any) {
 			base.error = error?.message || 'Marketplace lookup failed';
@@ -195,7 +184,7 @@ export async function checkMarketplaceUpdates(options: {
 		host_version: hostVersion,
 		checked_at: new Date().toISOString(),
 		update_count: sorted.filter((item) => item.has_update).length,
-		incompatible_count: sorted.filter((item) => item.incompatible_update).length,
+		host_mismatch_count: sorted.filter((item) => item.has_update && item.host_mismatch).length,
 		items: sorted,
 	};
 

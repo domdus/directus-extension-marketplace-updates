@@ -85,13 +85,20 @@ function matchesComparator(version: string, token: string): boolean {
 	}
 }
 
-/** Marketplace `host_version` ranges, e.g. `>=10.10.0 <13.0.0`. */
+/** Marketplace `host_version` ranges, e.g. `>=10.10.0 <13.0.0` or `^10.0.0 || ^11.0.0`. */
 export function versionSatisfies(version: string, range: string | null | undefined): boolean {
 	const v = normalizeVersion(version);
 	if (!v) return false;
 	if (!range || !String(range).trim()) return true;
 	return String(range)
 		.trim()
-		.split(/\s+/)
-		.every((token) => matchesComparator(v, token));
+		.split(/\s*\|\|\s*/)
+		.some((clause) => {
+			const tokens = clause
+				.trim()
+				.split(/\s+/)
+				.filter((token) => token && token !== '||');
+			if (!tokens.length) return false;
+			return tokens.every((token) => matchesComparator(v, token));
+		});
 }

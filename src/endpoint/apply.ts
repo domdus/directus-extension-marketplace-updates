@@ -1,6 +1,6 @@
 import type { ApiOutput } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
-import { compareSemver, normalizeVersion, versionSatisfies } from '../shared/semver';
+import { compareSemver, normalizeVersion } from '../shared/semver';
 import type { UpdateApplyResponse } from '../shared/types';
 import { invalidateUpdateCache } from './check';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
@@ -52,20 +52,20 @@ export async function applyMarketplaceUpdate(options: {
 		}
 
 		const registry = resolveRegistryBase(options.env);
-		const hostVersion = readHostVersion(options.env, options.hostVersion || undefined);
+		// hostVersion is accepted for API compatibility; declared marketplace host ranges
+		// are advisory only and do not gate which version is installed.
+		readHostVersion(options.env, options.hostVersion || undefined);
 		const described = await describeExtension(options.extensionId, registry, true);
 		const versions = Array.isArray(described.versions) ? described.versions : [];
-		const compatible = versions.find((version) =>
-			hostVersion ? versionSatisfies(hostVersion, version.host_version) : true,
-		);
-		if (!compatible) {
-			throw Object.assign(new Error('No marketplace version is compatible with this Directus host'), {
+		const latest = versions[0] || null;
+		if (!latest) {
+			throw Object.assign(new Error('No marketplace versions were found for this extension'), {
 				status: 400,
 			});
 		}
 
 		const fromVersion = schemaVersion(current);
-		if (compareSemver(compatible.version, fromVersion) <= 0) {
+		if (compareSemver(latest.version, fromVersion) <= 0) {
 			throw Object.assign(new Error('This extension is already up to date'), { status: 400 });
 		}
 
@@ -75,7 +75,7 @@ export async function applyMarketplaceUpdate(options: {
 
 		try {
 			await options.extensionsService.uninstall(options.extensionId);
-			await options.extensionsService.install(options.extensionId, compatible.id);
+			await options.extensionsService.install(options.extensionId, latest.id);
 		} catch (error) {
 			try {
 				await options.extensionsService.install(options.extensionId, previousVersionId);
@@ -99,7 +99,7 @@ export async function applyMarketplaceUpdate(options: {
 			id: options.extensionId,
 			name: described.name || schemaName(current),
 			from_version: fromVersion,
-			to_version: compatible.version,
+			to_version: latest.version,
 			reload_required: true,
 			self_update: selfUpdate,
 		};

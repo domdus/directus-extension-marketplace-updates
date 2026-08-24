@@ -23,11 +23,10 @@ export type ExtensionUpdateItem = {
 	current_version_id: string;
 	latest_version: string | null;
 	latest_version_id: string | null;
-	latest_compatible_version: string | null;
-	latest_compatible_version_id: string | null;
 	host_version: string | null;
 	has_update: boolean;
-	incompatible_update: boolean;
+	/** Declared marketplace host range does not match this Directus — advisory only. */
+	host_mismatch: boolean;
 	is_self: boolean;
 	marketplace_path: string;
 	error?: string;
@@ -37,7 +36,7 @@ export type UpdateCheckResponse = {
 	host_version: string | null;
 	checked_at: string;
 	update_count: number;
-	incompatible_count: number;
+	host_mismatch_count: number;
 	items: ExtensionUpdateItem[];
 };
 
