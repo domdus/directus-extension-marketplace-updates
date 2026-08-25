@@ -130,26 +130,38 @@
 		<v-dialog v-model="confirmAllOpen" @esc="!updatingAll && (confirmAllOpen = false)">
 			<v-card>
 				<v-card-title>
-					Update {{ updateTargets.length }} extension<template v-if="updateTargets.length !== 1"
-						>s</template
-					>?
+					<template v-if="updatingAll && bulkProgress">
+						Updating extensions…
+					</template>
+					<template v-else>
+						Update {{ updateTargets.length }} extension<template v-if="updateTargets.length !== 1"
+							>s</template
+						>?
+					</template>
 				</v-card-title>
 				<v-card-text>
-					<p>
-						Each extension is uninstalled and reinstalled at its latest marketplace version, one at a
-						time. Config in project settings is kept. The Data Studio will need a reload afterwards.
+					<p v-if="updatingAll && bulkProgress" class="bulk-progress">
+						Updating {{ bulkProgress.name }} ({{ bulkProgress.current }}/{{ bulkProgress.total }})…
 					</p>
-					<p v-if="updateTargets.some((item) => item.host_mismatch)" class="dialog-note">
-						Some releases declare a host range that does not match this Directus. Publishers often
-						leave that field outdated — proceed if you trust those releases.
-					</p>
-					<p v-if="updateTargets.some((item) => item.is_self)" class="dialog-note">
-						This checker is included and will be applied last.
-					</p>
+					<template v-else>
+						<p>
+							Each extension is uninstalled and reinstalled at its latest marketplace version, one at a
+							time. Config in project settings is kept. The Data Studio will need a reload afterwards.
+						</p>
+						<p v-if="updateTargets.some((item) => item.host_mismatch)" class="dialog-note">
+							Some releases declare a host range that does not match this Directus. Publishers often
+							leave that field outdated — proceed if you trust those releases.
+						</p>
+						<p v-if="updateTargets.some((item) => item.is_self)" class="dialog-note">
+							This checker is included and will be applied last.
+						</p>
+					</template>
 				</v-card-text>
 				<v-card-actions>
 					<v-button secondary :disabled="updatingAll" @click="confirmAllOpen = false">Cancel</v-button>
-					<v-button :loading="updatingAll" @click="runUpdateAll">Update all</v-button>
+					<v-button :loading="updatingAll" :disabled="updatingAll" @click="runUpdateAll">
+						Update all
+					</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
@@ -207,6 +219,7 @@ const reloadOpen = ref(false);
 const pending = ref<ExtensionUpdateItem | null>(null);
 const appliedVersion = ref('');
 const bulkResult = ref<{ succeeded: number; failed: number } | null>(null);
+const bulkProgress = ref<{ current: number; total: number; name: string } | null>(null);
 
 const summaryType = computed(() => {
 	if (!summary.value) return 'info';
@@ -258,6 +271,7 @@ function confirmUpdate(item: ExtensionUpdateItem) {
 function confirmUpdateAll() {
 	if (!updateTargets.value.length) return;
 	bulkResult.value = null;
+	bulkProgress.value = null;
 	confirmAllOpen.value = true;
 }
 
@@ -298,12 +312,19 @@ async function runUpdateAll() {
 
 	updatingAll.value = true;
 	errorMessage.value = null;
+	bulkProgress.value = null;
 	let succeeded = 0;
 	let failed = 0;
 	let lastError: string | null = null;
 
 	try {
-		for (const item of queue) {
+		for (let index = 0; index < queue.length; index++) {
+			const item = queue[index]!;
+			bulkProgress.value = {
+				current: index + 1,
+				total: queue.length,
+				name: item.name,
+			};
 			applyingId.value = item.id;
 			try {
 				await applyOne(item);
@@ -318,6 +339,7 @@ async function runUpdateAll() {
 	} finally {
 		applyingId.value = null;
 		updatingAll.value = false;
+		bulkProgress.value = null;
 		confirmAllOpen.value = false;
 	}
 
@@ -451,6 +473,14 @@ onMounted(() => {
 
 .dialog-note {
 	margin-top: 12px;
+}
+
+.bulk-progress {
+	margin: 0;
+	font-family: var(--theme--fonts--monospace--font-family, monospace);
+	font-size: 13px;
+	line-height: 1.45;
+	word-break: break-word;
 }
 
 .v-card-text p {
