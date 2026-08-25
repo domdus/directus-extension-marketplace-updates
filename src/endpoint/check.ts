@@ -174,14 +174,15 @@ export async function checkMarketplaceUpdates(options: {
 				}
 
 				// Block Update All / Update when the latest tarball is missing entrypoints.
+				// Keep this as an advisory — do not mark the row as Error if the install itself is fine.
 				if (base.has_update && base.latest_version_id) {
 					try {
 						await assertMarketplacePackageIntegrity(registry, base.latest_version_id);
 					} catch (integrityError: any) {
 						base.has_update = false;
-						base.error =
+						base.latest_blocked_reason =
 							integrityError?.message ||
-							`Latest ${base.latest_version} looks corrupt and was blocked`;
+							`Latest ${base.latest_version} is corrupt/incomplete and was blocked`;
 					}
 				}
 			}

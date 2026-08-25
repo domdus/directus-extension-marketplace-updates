@@ -86,6 +86,10 @@
 						<template v-if="item.is_self"> · This checker</template>
 					</p>
 					<p v-if="item.error" class="ext-error">{{ item.error }}</p>
+					<p v-else-if="item.latest_blocked_reason" class="ext-note">
+						Latest {{ item.latest_version }} is blocked (corrupt marketplace package). Your installed
+						version is fine — use Install version for other releases.
+					</p>
 					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
 						Declared host range {{ item.host_version }} (often outdated — update still allowed).
 					</p>

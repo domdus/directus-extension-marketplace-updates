@@ -29,7 +29,13 @@ export type ExtensionUpdateItem = {
 	host_mismatch: boolean;
 	is_self: boolean;
 	marketplace_path: string;
+	/** Real failures (lookup/read). Not used when only the newest marketplace release is corrupt. */
 	error?: string;
+	/**
+	 * Newest marketplace release exists but failed integrity (e.g. missing dist).
+	 * Installed version can still be fine — UI should stay "Up to date", not Error.
+	 */
+	latest_blocked_reason?: string;
 };
 
 export type UpdateCheckResponse = {
