@@ -151,7 +151,10 @@
 						Installed {{ versionList?.current_version || versionTarget?.current_version }}. Choose any
 						marketplace release; corrupt packages (missing entry files) are disabled.
 					</p>
-					<div v-if="loadingVersions" class="version-loading">Loading versions…</div>
+					<div v-if="loadingVersions" class="version-loading">
+						<v-progress-circular indeterminate />
+						<span>Loading versions…</span>
+					</div>
 					<div v-else-if="versionError" class="ext-error">{{ versionError }}</div>
 					<div v-else class="version-list">
 						<button
@@ -600,8 +603,7 @@ onMounted(() => {
 .ext-error,
 .ext-note,
 .version-meta,
-.version-intro,
-.version-loading {
+.version-intro {
 	margin: 6px 0 0;
 	font-size: 13px;
 	line-height: 1.45;
@@ -618,6 +620,18 @@ onMounted(() => {
 }
 
 .ext-note {
+	color: var(--theme--foreground-subdued);
+}
+
+.version-loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	min-height: 120px;
+	margin: 12px 0 0;
+	font-size: 13px;
+	line-height: 1.45;
 	color: var(--theme--foreground-subdued);
 }
 
