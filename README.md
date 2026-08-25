@@ -1,27 +1,27 @@
 # Marketplace Updates
 
-Check and apply updates for Directus extensions installed from the Marketplace. Directus can install, reinstall the same version, and uninstall marketplace extensions — it does not compare installed versions with newer registry releases, and the Studio Marketplace UI does not let you pick an older release.
+Check and apply updates for Directus extensions installed from the Marketplace. Native Directus can install, reinstall the same version, and uninstall Marketplace extensions, but it never checks for a newer registry release and the Studio Marketplace page cannot install an older version. This extension fills both gaps.
 
 Open **Settings → Extension Updates** (admins only). A notice also appears on **Settings → Marketplace** and **Settings → Extensions** when updates are waiting.
 
-<img alt="Extension Updates — marketplace extensions list" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_updates.png" width="800" />
+<img alt="Extension Updates — Marketplace extensions list" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_updates.png" width="800" />
 
 ## Features
 
-- Lists every extension installed with `source: registry` (marketplace)
-- Compares the installed semver with the latest marketplace version
+- Lists every extension installed with `source: registry` (Marketplace)
+- Compares the installed semver with the latest Marketplace version
 - Updates one extension at a time, or **Update all** (checker applied last)
-- **Choose Version** — pick any published marketplace release (newer or older), including rollback when latest is broken
-- Verifies marketplace packages before uninstall (blocks corrupt publishes missing `dist/` entry files)
+- **Choose Version** — pick any published Marketplace release (newer or older), including rollback when latest is broken
+- Verifies Marketplace packages before uninstall (blocks corrupt publishes missing `dist/` entry files)
 - Restores a disabled state after update, and rolls back to the previous version UUID if install fails
-- Skips local folder and npm (`node_modules`) installs — those are not marketplace-updatable
+- Skips local folder and npm (`node_modules`) installs — those are not Marketplace-updatable
 - Hidden from the left module bar; added next to native **Extensions** / **Marketplace** in Settings
 
 ### Choose Version / rollback
 
 Native Marketplace only offers the latest release. **Choose Version** loads every version from the registry, runs an integrity check on each tarball, and lets you install a specific version UUID (upgrade or downgrade). Corrupt packages are shown as blocked so they cannot wipe Studio extensions the way a bad latest release can.
 
-<img alt="Choose Version — pick an older or newer marketplace release" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_versions.png" width="800" />
+<img alt="Choose Version — pick an older or newer Marketplace release" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_versions.png" width="800" />
 
 When updates are available, a summary banner appears on the native Marketplace and Extensions pages:
 
@@ -31,7 +31,7 @@ When updates are available, a summary banner appears on the native Marketplace a
 
 ## Installation
 
-Requires **Directus 10.10+** (marketplace registry APIs).
+Requires **Directus 10.10+** (Marketplace registry APIs).
 
 ### npm
 
@@ -59,8 +59,8 @@ npm run build
 
 ## Notes
 
-- Latest **npm** and latest **marketplace** can differ. Apply always uses the marketplace version UUID, not npm.
-- Declared marketplace `host_version` ranges are **advisory only**. Publishers often leave them outdated, so a mismatch does not block Update.
+- Latest **npm** and latest **Marketplace** can differ. Apply always uses the Marketplace version UUID, not npm.
+- Declared Marketplace `host_version` ranges are **advisory only**. Publishers often leave them outdated, so a mismatch does not block Update.
 - Packages that fail integrity (for example missing `dist/index.js`) are blocked on Update / Update all and marked **Update blocked** when latest is corrupt but your install is fine.
 - Updating this checker itself unloads its API mid-flight in theory; the handler stays in memory for the request, then you must reload. Apply other extensions first when both need updates.
 

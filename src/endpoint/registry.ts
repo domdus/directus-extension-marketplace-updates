@@ -92,7 +92,7 @@ export async function describeExtension(
 	const payload = (await response.json()) as { data?: Partial<RegistryDescribe> };
 	const data = payload?.data;
 	if (!data?.id || !Array.isArray(data.versions)) {
-		throw new Error('Unexpected marketplace registry response');
+		throw new Error('Unexpected Marketplace registry response');
 	}
 
 	const described: RegistryDescribe = {

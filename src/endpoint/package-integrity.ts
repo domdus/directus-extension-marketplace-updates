@@ -92,7 +92,7 @@ export async function assertMarketplacePackageIntegrity(
 	try {
 		response = await fetch(url, { method: 'GET', headers: { Accept: 'application/octet-stream,*/*' } });
 	} catch (error: any) {
-		const message = `Could not download marketplace package for integrity check (${error?.message || 'network error'})`;
+		const message = `Could not download Marketplace package for integrity check (${error?.message || 'network error'})`;
 		integrityCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, ok: false, message });
 		throw Object.assign(new Error(message), { status: 502 });
 	}
@@ -163,7 +163,7 @@ export function assertInstalledPackageOnDisk(
 	const packageJsonPath = path.join(root, 'package.json');
 	if (!fs.existsSync(packageJsonPath)) {
 		throw Object.assign(
-			new Error(`Installed marketplace package is missing package.json under .registry/${versionId}`),
+			new Error(`Installed Marketplace package is missing package.json under .registry/${versionId}`),
 			{ status: 500 },
 		);
 	}
@@ -172,7 +172,7 @@ export function assertInstalledPackageOnDisk(
 	try {
 		manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as ExtensionManifest;
 	} catch {
-		throw Object.assign(new Error(`Installed marketplace package.json is invalid (.registry/${versionId})`), {
+		throw Object.assign(new Error(`Installed Marketplace package.json is invalid (.registry/${versionId})`), {
 			status: 500,
 		});
 	}
@@ -182,7 +182,7 @@ export function assertInstalledPackageOnDisk(
 	if (missing.length) {
 		throw Object.assign(
 			new Error(
-				`Installed marketplace package is corrupt/incomplete under .registry/${versionId} — missing ${missing.join(', ')}`,
+				`Installed Marketplace package is corrupt/incomplete under .registry/${versionId} — missing ${missing.join(', ')}`,
 			),
 			{ status: 500 },
 		);

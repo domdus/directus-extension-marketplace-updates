@@ -11,8 +11,8 @@
 		<template #sidebar>
 			<sidebar-detail id="about" icon="info" title="About">
 				<p class="sidebar-text">
-					This page compares registry-installed extensions with the marketplace and applies updates by
-					uninstalling the current version, then installing a chosen marketplace release. Packages that
+					This page compares registry-installed extensions with the Marketplace and applies updates by
+					uninstalling the current version, then installing a chosen Marketplace release. Packages that
 					are missing their built entry files (for example no dist/) are blocked before uninstall. Use
 					<strong>Choose Version</strong> to pick an older or newer release.
 				</p>
@@ -49,7 +49,7 @@
 						{{ summary.update_count }} update<template v-if="summary.update_count !== 1">s</template>
 						available
 					</template>
-					<template v-else>All marketplace extensions are up to date</template>
+					<template v-else>All Marketplace extensions are up to date</template>
 					<template v-if="summary.host_mismatch_count">
 						· {{ summary.host_mismatch_count }} newer release<template
 							v-if="summary.host_mismatch_count !== 1"
@@ -65,7 +65,7 @@
 
 			<div v-if="!checking && items.length === 0 && !errorMessage" class="result">
 				<v-notice type="info">
-					No marketplace-installed extensions were found on this instance.
+					No Marketplace-installed extensions were found on this instance.
 				</v-notice>
 			</div>
 
@@ -88,7 +88,7 @@
 					</p>
 					<p v-if="item.error" class="ext-error">{{ item.error }}</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
-						Latest {{ item.latest_version }} is corrupt on the marketplace. Your installed version is fine —
+						Latest {{ item.latest_version }} is corrupt on the Marketplace. Your installed version is fine —
 						use Choose Version for other releases.
 					</p>
 					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
@@ -149,7 +149,7 @@
 				<v-card-text>
 					<p class="version-intro">
 						Installed {{ versionList?.current_version || versionTarget?.current_version }}. Choose any
-						marketplace release; corrupt packages (missing entry files) are disabled.
+						Marketplace release; corrupt packages (missing entry files) are disabled.
 					</p>
 					<div v-if="loadingVersions" class="version-loading">
 						<v-progress-circular indeterminate />
@@ -238,7 +238,7 @@
 					</p>
 					<template v-else>
 						<p>
-							Each extension is uninstalled and reinstalled at its latest marketplace version, one at a
+							Each extension is uninstalled and reinstalled at its latest Marketplace version, one at a
 							time. Config in project settings is kept. The Data Studio will need a reload afterwards.
 						</p>
 						<p v-if="updateTargets.some((item) => item.host_mismatch)" class="dialog-note">

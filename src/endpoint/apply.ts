@@ -38,7 +38,7 @@ export async function applyMarketplaceUpdate(options: {
 	extensionsService: ExtensionsServiceLike;
 	env: Record<string, unknown>;
 	extensionId: string;
-	/** When set, install this marketplace version (upgrade or downgrade). */
+	/** When set, install this Marketplace version (upgrade or downgrade). */
 	versionId?: string | null;
 	hostVersion?: string | null;
 }): Promise<UpdateApplyResponse> {
@@ -50,7 +50,7 @@ export async function applyMarketplaceUpdate(options: {
 	try {
 		const current = await options.extensionsService.readOne(options.extensionId);
 		if (current.meta?.source !== 'registry') {
-			throw Object.assign(new Error('Only marketplace (registry) extensions can be updated this way'), {
+			throw Object.assign(new Error('Only Marketplace (registry) extensions can be updated this way'), {
 				status: 400,
 			});
 		}
@@ -59,13 +59,13 @@ export async function applyMarketplaceUpdate(options: {
 		}
 
 		const registry = resolveRegistryBase(options.env);
-		// hostVersion is accepted for API compatibility; declared marketplace host ranges
+		// hostVersion is accepted for API compatibility; declared Marketplace host ranges
 		// are advisory only and do not gate which version is installed.
 		readHostVersion(options.env, options.hostVersion || undefined);
 		const described = await describeExtension(options.extensionId, registry, true);
 		const versions = Array.isArray(described.versions) ? described.versions : [];
 		if (!versions.length) {
-			throw Object.assign(new Error('No marketplace versions were found for this extension'), {
+			throw Object.assign(new Error('No Marketplace versions were found for this extension'), {
 				status: 400,
 			});
 		}
@@ -76,7 +76,7 @@ export async function applyMarketplaceUpdate(options: {
 			: versions[0] || null;
 
 		if (!target) {
-			throw Object.assign(new Error('Requested marketplace version was not found'), { status: 400 });
+			throw Object.assign(new Error('Requested Marketplace version was not found'), { status: 400 });
 		}
 
 		const fromVersion = schemaVersion(current);
@@ -93,7 +93,7 @@ export async function applyMarketplaceUpdate(options: {
 			throw Object.assign(new Error('This extension is already up to date'), { status: 400 });
 		}
 
-		// Refuse corrupt marketplace publishes BEFORE uninstall (e.g. missing dist/).
+		// Refuse corrupt Marketplace publishes BEFORE uninstall (e.g. missing dist/).
 		await assertMarketplacePackageIntegrity(registry, target.id, { force: true });
 
 		try {

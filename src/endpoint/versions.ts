@@ -26,7 +26,7 @@ export async function listExtensionVersions(options: {
 }): Promise<ExtensionVersionListResponse> {
 	const current = await options.extensionsService.readOne(options.extensionId);
 	if (current.meta?.source !== 'registry') {
-		throw Object.assign(new Error('Only marketplace (registry) extensions are supported'), {
+		throw Object.assign(new Error('Only Marketplace (registry) extensions are supported'), {
 			status: 400,
 		});
 	}

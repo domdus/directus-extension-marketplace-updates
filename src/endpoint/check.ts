@@ -157,7 +157,7 @@ export async function checkMarketplaceUpdates(options: {
 			if (installedRelease?.version) currentVersion = installedRelease.version;
 			base.current_version = currentVersion;
 
-			// Always target the newest marketplace release. Declared host_version ranges are
+			// Always target the newest Marketplace release. Declared host_version ranges are
 			// often outdated and must not block updates.
 			const latest = versions[0] || null;
 			if (latest) {

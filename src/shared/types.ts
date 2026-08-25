@@ -25,14 +25,14 @@ export type ExtensionUpdateItem = {
 	latest_version_id: string | null;
 	host_version: string | null;
 	has_update: boolean;
-	/** Declared marketplace host range does not match this Directus — advisory only. */
+	/** Declared Marketplace host range does not match this Directus — advisory only. */
 	host_mismatch: boolean;
 	is_self: boolean;
 	marketplace_path: string;
-	/** Real failures (lookup/read). Not used when only the newest marketplace release is corrupt. */
+	/** Real failures (lookup/read). Not used when only the newest Marketplace release is corrupt. */
 	error?: string;
 	/**
-	 * Newest marketplace release exists but failed integrity (e.g. missing dist).
+	 * Newest Marketplace release exists but failed integrity (e.g. missing dist).
 	 * Installed version can still be fine — UI should stay "Up to date", not Error.
 	 */
 	latest_blocked_reason?: string;
