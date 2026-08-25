@@ -2,6 +2,7 @@ import type { ApiOutput, ExtensionSettings } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
 import { compareSemver, normalizeVersion, versionSatisfies } from '../shared/semver';
 import type { ExtensionUpdateItem, UpdateCheckResponse } from '../shared/types';
+import { assertMarketplacePackageIntegrity } from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
 
 type ExtensionsServiceLike = {
@@ -170,6 +171,18 @@ export async function checkMarketplaceUpdates(options: {
 				}
 				if (hostVersion && latest.host_version) {
 					base.host_mismatch = !versionSatisfies(hostVersion, latest.host_version);
+				}
+
+				// Block Update All / Update when the latest tarball is missing entrypoints.
+				if (base.has_update && base.latest_version_id) {
+					try {
+						await assertMarketplacePackageIntegrity(registry, base.latest_version_id);
+					} catch (integrityError: any) {
+						base.has_update = false;
+						base.error =
+							integrityError?.message ||
+							`Latest ${base.latest_version} looks corrupt and was blocked`;
+					}
 				}
 			}
 		} catch (error: any) {

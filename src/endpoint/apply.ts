@@ -3,6 +3,11 @@ import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/ext
 import { compareSemver, normalizeVersion } from '../shared/semver';
 import type { UpdateApplyResponse } from '../shared/types';
 import { invalidateUpdateCache } from './check';
+import {
+	assertInstalledPackageOnDisk,
+	assertMarketplacePackageIntegrity,
+	invalidateIntegrityCache,
+} from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
 
 type ExtensionsServiceLike = {
@@ -73,9 +78,13 @@ export async function applyMarketplaceUpdate(options: {
 		const wasEnabled = Boolean(current.meta.enabled);
 		const selfUpdate = isSelf(current);
 
+		// Refuse corrupt marketplace publishes BEFORE uninstall (e.g. missing dist/).
+		await assertMarketplacePackageIntegrity(registry, latest.id, { force: true });
+
 		try {
 			await options.extensionsService.uninstall(options.extensionId);
 			await options.extensionsService.install(options.extensionId, latest.id);
+			assertInstalledPackageOnDisk(options.env, latest.id);
 		} catch (error) {
 			try {
 				await options.extensionsService.install(options.extensionId, previousVersionId);
@@ -94,6 +103,7 @@ export async function applyMarketplaceUpdate(options: {
 		}
 
 		invalidateUpdateCache();
+		invalidateIntegrityCache();
 
 		return {
 			id: options.extensionId,

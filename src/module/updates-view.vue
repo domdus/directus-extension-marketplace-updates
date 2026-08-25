@@ -12,7 +12,8 @@
 			<sidebar-detail id="about" icon="info" title="About">
 				<p class="sidebar-text">
 					This page compares registry-installed extensions with the marketplace and applies updates by
-					uninstalling the current version, then installing the latest marketplace release.
+					uninstalling the current version, then installing the latest marketplace release. Packages that
+					are missing their built entry files (for example no dist/) are blocked before uninstall.
 				</p>
 			</sidebar-detail>
 		</template>
