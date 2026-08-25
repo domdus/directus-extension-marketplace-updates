@@ -34,9 +34,10 @@ export function usePageClass(): ComputedRef<string[]> {
 	const serverStore = useServerStore();
 
 	return computed(() => {
-		const classes = ['page'];
+		// Prefer core Settings width (padding + max-inline-size: 67.5rem).
+		const classes = ['page-container'];
 		if (needsReducedTopPadding(serverStore?.info?.version)) {
-			classes.push('page--flush-top');
+			classes.push('page-container--flush-top');
 		}
 		return classes;
 	});
