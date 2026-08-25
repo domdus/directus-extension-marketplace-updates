@@ -76,7 +76,7 @@
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
 						<v-chip v-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
-						<v-chip v-else-if="item.latest_blocked_reason" small class="state warning">Update blocked</v-chip>
+						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
 						<v-chip v-else small class="state enabled">Up to date</v-chip>
 					</div>
 					<p class="ext-meta">
