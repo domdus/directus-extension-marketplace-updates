@@ -14,7 +14,7 @@
 					This page compares registry-installed extensions with the marketplace and applies updates by
 					uninstalling the current version, then installing a chosen marketplace release. Packages that
 					are missing their built entry files (for example no dist/) are blocked before uninstall. Use
-					<strong>Install version</strong> to pick an older or newer release.
+					<strong>Choose version</strong> to pick an older or newer release.
 				</p>
 			</sidebar-detail>
 		</template>
@@ -88,7 +88,7 @@
 					<p v-if="item.error" class="ext-error">{{ item.error }}</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
 						Latest {{ item.latest_version }} is blocked (corrupt marketplace package). Your installed
-						version is fine — use Install version for other releases.
+						version is fine — use Choose version for other releases.
 					</p>
 					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
 						Declared host range {{ item.host_version }} (often outdated — update still allowed).
@@ -111,7 +111,7 @@
 						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
 						@click="openVersionPicker(item)"
 					>
-						Install version
+						Choose version
 					</v-button>
 					<v-button small secondary :to="item.marketplace_path">Marketplace</v-button>
 				</div>
@@ -144,7 +144,7 @@
 
 		<v-dialog v-model="versionPickerOpen" @esc="!applyingId && closeVersionPicker()">
 			<v-card class="version-card">
-				<v-card-title>Install version — {{ versionTarget?.name }}</v-card-title>
+				<v-card-title>Choose version — {{ versionTarget?.name }}</v-card-title>
 				<v-card-text>
 					<p class="version-intro">
 						Installed {{ versionList?.current_version || versionTarget?.current_version }}. Choose any
