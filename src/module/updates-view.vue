@@ -12,8 +12,9 @@
 			<sidebar-detail id="about" icon="info" title="About">
 				<p class="sidebar-text">
 					This page compares registry-installed extensions with the marketplace and applies updates by
-					uninstalling the current version, then installing the latest marketplace release. Packages that
-					are missing their built entry files (for example no dist/) are blocked before uninstall.
+					uninstalling the current version, then installing a chosen marketplace release. Packages that
+					are missing their built entry files (for example no dist/) are blocked before uninstall. Use
+					<strong>Install version</strong> to pick an older or newer release.
 				</p>
 			</sidebar-detail>
 		</template>
@@ -94,10 +95,19 @@
 						v-if="item.has_update"
 						small
 						:loading="applyingId === item.id"
-						:disabled="checking || updatingAll || Boolean(applyingId)"
+						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
 						@click="confirmUpdate(item)"
 					>
 						Update
+					</v-button>
+					<v-button
+						small
+						secondary
+						:loading="loadingVersions && versionTarget?.id === item.id"
+						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
+						@click="openVersionPicker(item)"
+					>
+						Install version
 					</v-button>
 					<v-button small secondary :to="item.marketplace_path">Marketplace</v-button>
 				</div>
@@ -124,6 +134,80 @@
 				<v-card-actions>
 					<v-button secondary @click="confirmOpen = false">Cancel</v-button>
 					<v-button :loading="Boolean(applyingId)" @click="runUpdate">Update</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
+		<v-dialog v-model="versionPickerOpen" @esc="!applyingId && closeVersionPicker()">
+			<v-card class="version-card">
+				<v-card-title>Install version — {{ versionTarget?.name }}</v-card-title>
+				<v-card-text>
+					<p class="version-intro">
+						Installed {{ versionList?.current_version || versionTarget?.current_version }}. Choose any
+						marketplace release; corrupt packages (missing entry files) are disabled.
+					</p>
+					<div v-if="loadingVersions" class="version-loading">Loading versions…</div>
+					<div v-else-if="versionError" class="ext-error">{{ versionError }}</div>
+					<div v-else class="version-list">
+						<button
+							v-for="version in versionList?.versions || []"
+							:key="version.id"
+							type="button"
+							class="version-row"
+							:class="{
+								current: version.is_current,
+								blocked: !version.installable && !version.is_current,
+							}"
+							:disabled="version.is_current || !version.installable || Boolean(applyingId)"
+							@click="confirmInstallVersion(version)"
+						>
+							<div class="version-row-main">
+								<strong>{{ version.version }}</strong>
+								<v-chip v-if="version.is_current" small class="state enabled">Installed</v-chip>
+								<v-chip v-else-if="!version.installable" small class="state">Blocked</v-chip>
+								<v-chip
+									v-else-if="isNewerThanInstalled(version.version)"
+									small
+									class="state warning"
+								>
+									Newer
+								</v-chip>
+								<v-chip v-else small class="type-chip">Older</v-chip>
+							</div>
+							<p v-if="version.publish_date" class="version-meta">
+								{{ formatDate(version.publish_date) }}
+								<template v-if="version.host_version"> · host {{ version.host_version }}</template>
+							</p>
+							<p v-if="version.error" class="ext-error">{{ version.error }}</p>
+						</button>
+					</div>
+				</v-card-text>
+				<v-card-actions>
+					<v-button secondary :disabled="Boolean(applyingId)" @click="closeVersionPicker">
+						Close
+					</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
+		<v-dialog v-model="confirmVersionOpen" @esc="confirmVersionOpen = false">
+			<v-card>
+				<v-card-title>
+					Install {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
+				</v-card-title>
+				<v-card-text>
+					<p>
+						This uninstalls {{ versionList?.current_version || versionTarget?.current_version }} and
+						installs {{ pendingVersion?.version }}. Config stored in project settings is kept. The
+						Data Studio will need a reload afterwards.
+					</p>
+					<p v-if="versionTarget?.is_self" class="dialog-note">
+						This is the update checker itself — reload immediately after installing.
+					</p>
+				</v-card-text>
+				<v-card-actions>
+					<v-button secondary @click="confirmVersionOpen = false">Cancel</v-button>
+					<v-button :loading="Boolean(applyingId)" @click="runInstallVersion">Install</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
@@ -181,8 +265,8 @@
 						Reload the Data Studio to load the new versions.
 					</template>
 					<template v-else>
-						{{ pending?.name || 'The extension' }} was updated to {{ appliedVersion }}. Reload the
-						Data Studio to load the new version.
+						{{ pending?.name || versionTarget?.name || 'The extension' }} was switched to
+						{{ appliedVersion }}. Reload the Data Studio to load that version.
 					</template>
 				</v-card-text>
 				<v-card-actions>
@@ -199,7 +283,13 @@ import { computed, onMounted, ref } from 'vue';
 import { useApi, useStores } from '@directus/extensions-sdk';
 import { usePageClass } from './composables/use-page-class';
 import ModuleNavigation from './navigation.vue';
-import type { ExtensionUpdateItem, UpdateCheckResponse } from '../shared/types';
+import { compareSemver } from '../shared/semver';
+import type {
+	ExtensionUpdateItem,
+	ExtensionVersionListResponse,
+	ExtensionVersionOption,
+	UpdateCheckResponse,
+} from '../shared/types';
 
 const pageClass = usePageClass();
 const api = useApi();
@@ -211,13 +301,20 @@ const serverStore = useServerStore();
 const checking = ref(false);
 const applyingId = ref<string | null>(null);
 const updatingAll = ref(false);
+const loadingVersions = ref(false);
 const errorMessage = ref<string | null>(null);
+const versionError = ref<string | null>(null);
 const summary = ref<UpdateCheckResponse | null>(null);
 const items = ref<ExtensionUpdateItem[]>([]);
 const confirmOpen = ref(false);
 const confirmAllOpen = ref(false);
+const confirmVersionOpen = ref(false);
+const versionPickerOpen = ref(false);
 const reloadOpen = ref(false);
 const pending = ref<ExtensionUpdateItem | null>(null);
+const versionTarget = ref<ExtensionUpdateItem | null>(null);
+const versionList = ref<ExtensionVersionListResponse | null>(null);
+const pendingVersion = ref<ExtensionVersionOption | null>(null);
 const appliedVersion = ref('');
 const bulkResult = ref<{ succeeded: number; failed: number } | null>(null);
 const bulkProgress = ref<{ current: number; total: number; name: string } | null>(null);
@@ -237,6 +334,18 @@ const updateTargets = computed(() => {
 
 function formatType(type: string) {
 	return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+function formatDate(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function isNewerThanInstalled(version: string) {
+	const current = versionList.value?.current_version || versionTarget.value?.current_version;
+	if (!current || current === 'unknown') return false;
+	return compareSemver(version, current) > 0;
 }
 
 function hostParam() {
@@ -276,12 +385,44 @@ function confirmUpdateAll() {
 	confirmAllOpen.value = true;
 }
 
-async function applyOne(item: ExtensionUpdateItem) {
+async function openVersionPicker(item: ExtensionUpdateItem) {
+	versionTarget.value = item;
+	versionList.value = null;
+	versionError.value = null;
+	pendingVersion.value = null;
+	versionPickerOpen.value = true;
+	loadingVersions.value = true;
+	try {
+		const res = await api.get(`/extension-updates/versions/${encodeURIComponent(item.id)}`);
+		versionList.value = (res.data?.data || null) as ExtensionVersionListResponse | null;
+	} catch (error: any) {
+		versionError.value =
+			error?.response?.data?.errors?.[0]?.message || error?.message || 'Could not load versions';
+	} finally {
+		loadingVersions.value = false;
+	}
+}
+
+function closeVersionPicker() {
+	if (applyingId.value) return;
+	versionPickerOpen.value = false;
+	confirmVersionOpen.value = false;
+	pendingVersion.value = null;
+}
+
+function confirmInstallVersion(version: ExtensionVersionOption) {
+	if (!version.installable || version.is_current) return;
+	pendingVersion.value = version;
+	confirmVersionOpen.value = true;
+}
+
+async function applyOne(item: ExtensionUpdateItem, versionId?: string) {
 	const res = await api.post('/extension-updates/apply', {
 		extension: item.id,
+		version: versionId || undefined,
 		host: hostParam(),
 	});
-	return res.data?.data?.to_version || item.latest_version || '';
+	return res.data?.data?.to_version || versionId || item.latest_version || '';
 }
 
 async function runUpdate() {
@@ -299,6 +440,29 @@ async function runUpdate() {
 		errorMessage.value =
 			error?.response?.data?.errors?.[0]?.message || error?.message || 'Update failed';
 		confirmOpen.value = false;
+	} finally {
+		applyingId.value = null;
+	}
+}
+
+async function runInstallVersion() {
+	const item = versionTarget.value;
+	const version = pendingVersion.value;
+	if (!item || !version) return;
+	applyingId.value = item.id;
+	errorMessage.value = null;
+	bulkResult.value = null;
+	try {
+		appliedVersion.value = await applyOne(item, version.id);
+		confirmVersionOpen.value = false;
+		versionPickerOpen.value = false;
+		pending.value = item;
+		reloadOpen.value = true;
+		await load(true);
+	} catch (error: any) {
+		errorMessage.value =
+			error?.response?.data?.errors?.[0]?.message || error?.message || 'Install failed';
+		confirmVersionOpen.value = false;
 	} finally {
 		applyingId.value = null;
 	}
@@ -429,11 +593,18 @@ onMounted(() => {
 
 .ext-meta,
 .ext-error,
-.ext-note {
+.ext-note,
+.version-meta,
+.version-intro,
+.version-loading {
 	margin: 6px 0 0;
 	font-size: 13px;
 	line-height: 1.45;
 	color: var(--theme--foreground-subdued);
+}
+
+.ext-meta,
+.version-meta {
 	font-family: var(--theme--fonts--monospace--font-family, monospace);
 }
 
@@ -450,6 +621,7 @@ onMounted(() => {
 	flex-wrap: wrap;
 	gap: 8px;
 	flex-shrink: 0;
+	justify-content: flex-end;
 }
 
 .type-chip {
@@ -482,6 +654,51 @@ onMounted(() => {
 	font-size: 13px;
 	line-height: 1.45;
 	word-break: break-word;
+}
+
+.version-card {
+	min-width: min(560px, 92vw);
+}
+
+.version-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: min(50vh, 420px);
+	overflow: auto;
+	margin-top: 12px;
+}
+
+.version-row {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 12px 14px;
+	border: var(--theme--border-width, 1px) solid var(--theme--border-color-subdued);
+	border-radius: var(--theme--border-radius, 6px);
+	background: var(--theme--background);
+	color: inherit;
+	cursor: pointer;
+}
+
+.version-row:hover:not(:disabled) {
+	border-color: var(--theme--primary);
+}
+
+.version-row:disabled {
+	cursor: default;
+	opacity: 0.85;
+}
+
+.version-row.blocked {
+	opacity: 0.7;
+}
+
+.version-row-main {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
 }
 
 .v-card-text p {

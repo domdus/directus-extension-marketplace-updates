@@ -3,6 +3,7 @@ import type { ApiExtensionContext } from '@directus/types';
 import { accountabilityIsAdmin } from '../shared/admin';
 import { applyMarketplaceUpdate } from './apply';
 import { checkMarketplaceUpdates } from './check';
+import { listExtensionVersions } from './versions';
 
 function requireAdmin(req: Request, res: Response): boolean {
 	if (!accountabilityIsAdmin((req as any).accountability)) {
@@ -60,6 +61,47 @@ export default {
 			}
 		});
 
+		router.get('/versions/:extension', async (req: Request, res: Response, next: NextFunction) => {
+			try {
+				if (!requireAdmin(req, res)) return;
+				if (typeof services.ExtensionsService !== 'function') {
+					res.status(501).json({
+						errors: [
+							{
+								message: 'Marketplace updates require Directus 10.10 or newer',
+								extensions: { code: 'UNSUPPORTED' },
+							},
+						],
+					});
+					return;
+				}
+
+				const extensionId = String(req.params.extension || '');
+				if (!extensionId) {
+					res.status(400).json({ errors: [{ message: 'extension is required' }] });
+					return;
+				}
+
+				const schema = await getSchema();
+				const extensionsService = new services.ExtensionsService({
+					accountability: (req as any).accountability,
+					schema,
+				});
+				const data = await listExtensionVersions({
+					extensionsService,
+					env,
+					extensionId,
+				});
+				res.json({ data });
+			} catch (error) {
+				if ((error as { status?: number })?.status) {
+					sendError(res, error);
+					return;
+				}
+				next(error);
+			}
+		});
+
 		router.post('/apply', async (req: Request, res: Response, next: NextFunction) => {
 			try {
 				if (!requireAdmin(req, res)) return;
@@ -75,7 +117,8 @@ export default {
 					return;
 				}
 
-				const extensionId = String((req.body as { extension?: string } | undefined)?.extension || '');
+				const body = (req.body || {}) as { extension?: string; version?: string; host?: string };
+				const extensionId = String(body.extension || '');
 				if (!extensionId) {
 					res.status(400).json({ errors: [{ message: 'extension is required' }] });
 					return;
@@ -86,12 +129,12 @@ export default {
 					accountability: (req as any).accountability,
 					schema,
 				});
-				const host = typeof req.body?.host === 'string' ? req.body.host : undefined;
 				const data = await applyMarketplaceUpdate({
 					extensionsService,
 					env,
 					extensionId,
-					hostVersion: host,
+					versionId: body.version || null,
+					hostVersion: typeof body.host === 'string' ? body.host : undefined,
 				});
 				res.json({ data });
 			} catch (error) {

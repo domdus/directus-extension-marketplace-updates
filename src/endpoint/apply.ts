@@ -38,6 +38,8 @@ export async function applyMarketplaceUpdate(options: {
 	extensionsService: ExtensionsServiceLike;
 	env: Record<string, unknown>;
 	extensionId: string;
+	/** When set, install this marketplace version (upgrade or downgrade). */
+	versionId?: string | null;
 	hostVersion?: string | null;
 }): Promise<UpdateApplyResponse> {
 	if (applying) {
@@ -62,29 +64,42 @@ export async function applyMarketplaceUpdate(options: {
 		readHostVersion(options.env, options.hostVersion || undefined);
 		const described = await describeExtension(options.extensionId, registry, true);
 		const versions = Array.isArray(described.versions) ? described.versions : [];
-		const latest = versions[0] || null;
-		if (!latest) {
+		if (!versions.length) {
 			throw Object.assign(new Error('No marketplace versions were found for this extension'), {
 				status: 400,
 			});
 		}
 
-		const fromVersion = schemaVersion(current);
-		if (compareSemver(latest.version, fromVersion) <= 0) {
-			throw Object.assign(new Error('This extension is already up to date'), { status: 400 });
+		const requestedId = options.versionId ? String(options.versionId) : null;
+		const target = requestedId
+			? versions.find((version) => version.id === requestedId) || null
+			: versions[0] || null;
+
+		if (!target) {
+			throw Object.assign(new Error('Requested marketplace version was not found'), { status: 400 });
 		}
 
+		const fromVersion = schemaVersion(current);
 		const previousVersionId = String(current.meta.folder);
 		const wasEnabled = Boolean(current.meta.enabled);
 		const selfUpdate = isSelf(current);
 
+		if (target.id === previousVersionId) {
+			throw Object.assign(new Error(`Version ${target.version} is already installed`), { status: 400 });
+		}
+
+		// Default "Update" path only moves forward unless a specific version was chosen.
+		if (!requestedId && compareSemver(target.version, fromVersion) <= 0) {
+			throw Object.assign(new Error('This extension is already up to date'), { status: 400 });
+		}
+
 		// Refuse corrupt marketplace publishes BEFORE uninstall (e.g. missing dist/).
-		await assertMarketplacePackageIntegrity(registry, latest.id, { force: true });
+		await assertMarketplacePackageIntegrity(registry, target.id, { force: true });
 
 		try {
 			await options.extensionsService.uninstall(options.extensionId);
-			await options.extensionsService.install(options.extensionId, latest.id);
-			assertInstalledPackageOnDisk(options.env, latest.id);
+			await options.extensionsService.install(options.extensionId, target.id);
+			assertInstalledPackageOnDisk(options.env, target.id);
 		} catch (error) {
 			try {
 				await options.extensionsService.install(options.extensionId, previousVersionId);
@@ -109,7 +124,7 @@ export async function applyMarketplaceUpdate(options: {
 			id: options.extensionId,
 			name: described.name || schemaName(current),
 			from_version: fromVersion,
-			to_version: latest.version,
+			to_version: target.version,
 			reload_required: true,
 			self_update: selfUpdate,
 		};

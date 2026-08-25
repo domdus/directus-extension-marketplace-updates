@@ -48,3 +48,21 @@ export type UpdateApplyResponse = {
 	reload_required: boolean;
 	self_update: boolean;
 };
+
+export type ExtensionVersionOption = {
+	id: string;
+	version: string;
+	host_version: string | null;
+	publish_date: string | null;
+	is_current: boolean;
+	installable: boolean;
+	error?: string;
+};
+
+export type ExtensionVersionListResponse = {
+	id: string;
+	name: string;
+	current_version: string;
+	current_version_id: string;
+	versions: ExtensionVersionOption[];
+};
