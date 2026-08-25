@@ -541,7 +541,6 @@ onMounted(() => {
 .page {
 	padding: var(--content-padding);
 	padding-block-end: var(--content-padding-bottom);
-	max-width: 760px;
 }
 
 .page--flush-top {
