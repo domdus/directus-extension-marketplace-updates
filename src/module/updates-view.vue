@@ -541,6 +541,7 @@ onMounted(() => {
 .page {
 	padding: var(--content-padding);
 	padding-block-end: var(--content-padding-bottom);
+	max-inline-size: 67.5rem;
 }
 
 .page--flush-top {
