@@ -2,7 +2,7 @@
 	"name": "directus-extension-marketplace-updates",
 	"description": "Check and apply updates for Directus extensions installed from the Marketplace",
 	"icon": "system_update",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"license": "MIT",
 	"keywords": [
 		"directus",
