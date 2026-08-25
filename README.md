@@ -2,18 +2,24 @@
 
 Check and apply updates for Directus extensions installed from the Marketplace. Directus can install, reinstall the same version, and uninstall marketplace extensions — it does not compare installed versions with newer registry releases.
 
-Open **Settings → Extension Updates** (admins only). A notice also appears on **Settings → Extensions** when updates are waiting.
+Open **Settings → Extension Updates** (admins only). A notice also appears on **Settings → Marketplace** and **Settings → Extensions** when updates are waiting.
 
-<img alt="Extension Updates — marketplace extensions list" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/extension-updates.png" width="800" />
+<img alt="Extension Updates — marketplace extensions list" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_updates.png" width="800" />
 
 ## Features
 
 - Lists every extension installed with `source: registry` (marketplace)
 - Compares the installed semver with the latest marketplace version
-- Updates one extension at a time: uninstall, then install the new version UUID
+- Updates one extension at a time, or **Update all** (checker applied last)
 - Restores a disabled state after update, and rolls back to the previous version UUID if install fails
 - Skips local folder and npm (`node_modules`) installs — those are not marketplace-updatable
 - Hidden from the left module bar; added next to native **Extensions** / **Marketplace** in Settings
+
+When updates are available, a summary banner appears on the native Marketplace and Extensions pages:
+
+<img alt="Marketplace update banner" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/marketplace_banner.png" width="800" />
+
+<img alt="Extensions update banner" src="https://raw.githubusercontent.com/domdus/directus-extension-marketplace-updates/main/docs/extensions_banner.png" width="800" />
 
 ## Installation
 
