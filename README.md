@@ -13,7 +13,8 @@ Open **Settings → Extension Updates** (admins only). A notice also appears on 
 - Updates one extension at a time, or **Update all** (checker applied last)
 - **Choose Version** — pick any published Marketplace release (newer or older), including rollback when latest is broken
 - Verifies Marketplace packages before uninstall (blocks corrupt publishes missing `dist/` entry files)
-- Restores a disabled state after update, and rolls back to the previous version UUID if install fails
+- On load, **disables** enabled Marketplace installs whose entry files are missing on disk. Directus bundles all Studio extensions in one file — one missing `dist` would otherwise hide this updater too. After reload, Extension Updates / Marketplace show a **Corrupt install** banner. Use Choose Version to install a complete release, then enable it again.
+- Restores a disabled state after update. If install fails (or the extracted package is missing entry files), uninstalls the failed version first, then reinstalls the previous Marketplace UUID — a second `install()` cannot run while the new row still exists
 - Skips local folder and npm (`node_modules`) installs — those are not Marketplace-updatable
 - Hidden from the left module bar; added next to native **Extensions** / **Marketplace** in Settings
 

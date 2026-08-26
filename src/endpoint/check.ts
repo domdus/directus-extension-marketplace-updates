@@ -2,7 +2,7 @@ import type { ApiOutput, ExtensionSettings } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
 import { compareSemver, normalizeVersion, versionSatisfies } from '../shared/semver';
 import type { ExtensionUpdateItem, UpdateCheckResponse } from '../shared/types';
-import { assertMarketplacePackageIntegrity } from './package-integrity';
+import { assertMarketplacePackageIntegrity, inspectInstalledPackage } from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
 
 type ExtensionsServiceLike = {
@@ -84,8 +84,9 @@ function sortItems(items: ExtensionUpdateItem[]): ExtensionUpdateItem[] {
 	const rank = (item: ExtensionUpdateItem) => {
 		if (item.has_update && item.is_self) return 1;
 		if (item.has_update) return 0;
-		if (item.error) return 2;
-		return 3;
+		if (item.installed_blocked_reason) return 2;
+		if (item.error) return 3;
+		return 4;
 	};
 	return [...items].sort((a, b) => {
 		const diff = rank(a) - rank(b);
@@ -147,6 +148,13 @@ export async function checkMarketplaceUpdates(options: {
 			marketplace_path: `/settings/marketplace/extension/${entry.id}`,
 		};
 
+		if (currentVersionId) {
+			const inspected = inspectInstalledPackage(options.env, currentVersionId);
+			if (inspected.missing.length) {
+				base.installed_blocked_reason = `Installed package is missing ${inspected.missing.join(', ')}`;
+			}
+		}
+
 		try {
 			const described = await describeExtension(entry.id, registry, Boolean(options.force));
 			const versions = Array.isArray(described.versions) ? described.versions : [];
@@ -199,6 +207,7 @@ export async function checkMarketplaceUpdates(options: {
 		checked_at: new Date().toISOString(),
 		update_count: sorted.filter((item) => item.has_update).length,
 		host_mismatch_count: sorted.filter((item) => item.has_update && item.host_mismatch).length,
+		corrupt_count: sorted.filter((item) => item.installed_blocked_reason).length,
 		items: sorted,
 	};
 

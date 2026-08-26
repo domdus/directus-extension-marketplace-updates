@@ -9,6 +9,7 @@ const ENDPOINT_PATH = '/extension-updates/check';
 type CheckPayload = {
 	update_count?: number;
 	host_mismatch_count?: number;
+	corrupt_count?: number;
 	host_version?: string | null;
 };
 
@@ -114,6 +115,10 @@ function ensureStyles(): void {
 }
 .eu-ext-banner a:hover {
 	text-decoration: underline;
+}
+.eu-ext-banner.danger {
+	background: var(--theme--danger-background, var(--danger-alt));
+	color: var(--theme--danger, var(--danger));
 }
 `;
 	document.head.appendChild(el);
@@ -261,6 +266,7 @@ async function loadUpdateCount(): Promise<CheckPayload | null> {
 		return {
 			update_count: data.update_count,
 			host_mismatch_count: data.host_mismatch_count,
+			corrupt_count: data.corrupt_count,
 			host_version: data.host_version,
 		};
 	} catch {
@@ -270,6 +276,14 @@ async function loadUpdateCount(): Promise<CheckPayload | null> {
 
 function formatSummary(data: CheckPayload): string {
 	const parts: string[] = [];
+	const corrupt = Number(data.corrupt_count || 0);
+	if (corrupt) {
+		parts.push(
+			corrupt === 1
+				? '1 Marketplace package was disabled because it is corrupt'
+				: `${corrupt} Marketplace packages were disabled because they are corrupt`,
+		);
+	}
 	const count = Number(data.update_count || 0);
 	if (count) {
 		parts.push(count === 1 ? '1 Marketplace update available' : `${count} Marketplace updates available`);
@@ -306,7 +320,8 @@ async function injectBanner(): Promise<void> {
 		bannerCheckedAt = Date.now();
 		if (!isBannerPage()) return;
 		const count = Number(data?.update_count || 0);
-		if (!count || !data) {
+		const corrupt = Number(data?.corrupt_count || 0);
+		if ((!count && !corrupt) || !data) {
 			bannerEmpty = true;
 			removeBanner();
 			return;
@@ -316,7 +331,7 @@ async function injectBanner(): Promise<void> {
 		if (!host) return;
 		const el = document.createElement('div');
 		el.setAttribute(BANNER_ATTR, '1');
-		el.className = 'eu-ext-banner';
+		el.className = corrupt ? 'eu-ext-banner danger' : 'eu-ext-banner';
 		const label = formatSummary(data);
 		el.innerHTML = `<span>${label}</span><a href="${updatesPath()}">Review updates</a>`;
 		const review = el.querySelector('a');

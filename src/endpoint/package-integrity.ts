@@ -154,35 +154,49 @@ export function resolveExtensionsPath(env: Record<string, unknown> | undefined):
 	return path.resolve(process.cwd(), 'extensions');
 }
 
+export function inspectInstalledPackage(
+	env: Record<string, unknown> | undefined,
+	versionId: string,
+): { name: string | null; missing: string[]; error?: string } {
+	const root = path.join(resolveExtensionsPath(env), '.registry', versionId);
+	const packageJsonPath = path.join(root, 'package.json');
+	if (!fs.existsSync(packageJsonPath)) {
+		return { name: null, missing: ['package.json'], error: 'missing package.json' };
+	}
+
+	let manifest: ExtensionManifest & { name?: string };
+	try {
+		manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as ExtensionManifest & { name?: string };
+	} catch {
+		return { name: null, missing: ['package.json'], error: 'invalid package.json' };
+	}
+
+	const entries = entryPathsFromManifest(manifest);
+	const missing = entries.filter((entry) => !fs.existsSync(path.join(root, entry)));
+	return { name: manifest.name ? String(manifest.name) : null, missing };
+}
+
 /** After Directus install — confirm entry files landed under .registry/<versionId>. */
 export function assertInstalledPackageOnDisk(
 	env: Record<string, unknown> | undefined,
 	versionId: string,
 ): void {
-	const root = path.join(resolveExtensionsPath(env), '.registry', versionId);
-	const packageJsonPath = path.join(root, 'package.json');
-	if (!fs.existsSync(packageJsonPath)) {
+	const inspected = inspectInstalledPackage(env, versionId);
+	if (inspected.error === 'missing package.json') {
 		throw Object.assign(
 			new Error(`Installed Marketplace package is missing package.json under .registry/${versionId}`),
 			{ status: 500 },
 		);
 	}
-
-	let manifest: ExtensionManifest;
-	try {
-		manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as ExtensionManifest;
-	} catch {
+	if (inspected.error === 'invalid package.json') {
 		throw Object.assign(new Error(`Installed Marketplace package.json is invalid (.registry/${versionId})`), {
 			status: 500,
 		});
 	}
-
-	const entries = entryPathsFromManifest(manifest);
-	const missing = entries.filter((entry) => !fs.existsSync(path.join(root, entry)));
-	if (missing.length) {
+	if (inspected.missing.length) {
 		throw Object.assign(
 			new Error(
-				`Installed Marketplace package is corrupt/incomplete under .registry/${versionId} — missing ${missing.join(', ')}`,
+				`Installed Marketplace package is corrupt/incomplete under .registry/${versionId} — missing ${inspected.missing.join(', ')}`,
 			),
 			{ status: 500 },
 		);

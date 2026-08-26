@@ -36,6 +36,11 @@ export type ExtensionUpdateItem = {
 	 * Installed version can still be fine — UI should stay "Up to date", not Error.
 	 */
 	latest_blocked_reason?: string;
+	/**
+	 * Installed .registry folder is missing declared entry files (e.g. dist/index.js).
+	 * Directus cannot bundle App extensions until this package is disabled or replaced.
+	 */
+	installed_blocked_reason?: string;
 };
 
 export type UpdateCheckResponse = {
@@ -43,6 +48,7 @@ export type UpdateCheckResponse = {
 	checked_at: string;
 	update_count: number;
 	host_mismatch_count: number;
+	corrupt_count: number;
 	items: ExtensionUpdateItem[];
 };
 

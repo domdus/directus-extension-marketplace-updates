@@ -44,6 +44,12 @@
 			</div>
 
 			<div v-else-if="summary" class="result">
+				<v-notice v-if="summary.corrupt_count" type="danger" class="result">
+					{{ summary.corrupt_count }} Marketplace package<template v-if="summary.corrupt_count !== 1">s were</template>
+					<template v-else> was</template>
+					disabled because the installed files are incomplete. Use Choose Version to install a complete
+					release, then enable it again.
+				</v-notice>
 				<v-notice :type="summaryType">
 					<template v-if="summary.update_count">
 						{{ summary.update_count }} update<template v-if="summary.update_count !== 1">s</template>
@@ -74,7 +80,8 @@
 					<div class="ext-title">
 						<strong>{{ item.name }}</strong>
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
-						<v-chip v-if="item.has_update" small class="state warning">Update</v-chip>
+						<v-chip v-if="item.installed_blocked_reason" small class="state warning">Corrupt install</v-chip>
+						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
 						<v-chip v-else small class="state enabled">Up to date</v-chip>
@@ -86,7 +93,11 @@
 						</template>
 						<template v-if="item.is_self"> · This checker</template>
 					</p>
-					<p v-if="item.error" class="ext-error">{{ item.error }}</p>
+					<p v-if="item.installed_blocked_reason" class="ext-error">
+						{{ item.installed_blocked_reason }}. Disabled so other Studio extensions can load. Use Choose
+						Version to install a complete release, then enable it again.
+					</p>
+					<p v-else-if="item.error" class="ext-error">{{ item.error }}</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
 						Latest {{ item.latest_version }} is corrupt on the Marketplace. Your installed version is fine —
 						use Choose Version for other releases.
@@ -329,6 +340,7 @@ const bulkProgress = ref<{ current: number; total: number; name: string } | null
 
 const summaryType = computed(() => {
 	if (!summary.value) return 'info';
+	if (summary.value.corrupt_count) return 'warning';
 	if (summary.value.update_count) return 'warning';
 	return 'success';
 });

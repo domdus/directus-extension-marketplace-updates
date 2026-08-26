@@ -96,15 +96,38 @@ export async function applyMarketplaceUpdate(options: {
 		// Refuse corrupt Marketplace publishes BEFORE uninstall (e.g. missing dist/).
 		await assertMarketplacePackageIntegrity(registry, target.id, { force: true });
 
+		/**
+		 * Native Directus has no “switch version” API:
+		 *   install()   → insert DB row (folder = version UUID), then extract tarball
+		 *   reinstall() → re-extract the SAME folder UUID (no version change)
+		 *   uninstall() → delete DB row, then delete `.registry/<folder>`
+		 *
+		 * Switching versions therefore has to be uninstall + install. That is unsafe
+		 * if install() “succeeds” with an incomplete tarball (core only checks that
+		 * package.json has a type — not that `directus:extension.path` exists).
+		 *
+		 * Rollback must uninstall the failed/new row first: a second install() would
+		 * otherwise hit a unique constraint on `directus_extensions.id` and leave a
+		 * ghost `.registry/<new-uuid>` that breaks the whole Studio app bundle.
+		 */
+		let swapped = false;
 		try {
+			swapped = true;
 			await options.extensionsService.uninstall(options.extensionId);
 			await options.extensionsService.install(options.extensionId, target.id);
 			assertInstalledPackageOnDisk(options.env, target.id);
 		} catch (error) {
-			try {
-				await options.extensionsService.install(options.extensionId, previousVersionId);
-			} catch {
-				// original error is more useful
+			if (swapped) {
+				try {
+					await options.extensionsService.uninstall(options.extensionId);
+				} catch {
+					// already gone, or never created
+				}
+				try {
+					await options.extensionsService.install(options.extensionId, previousVersionId);
+				} catch {
+					// original error is more useful
+				}
 			}
 			throw error;
 		}

@@ -3,6 +3,7 @@ import type { ApiExtensionContext } from '@directus/types';
 import { accountabilityIsAdmin } from '../shared/admin';
 import { applyMarketplaceUpdate } from './apply';
 import { checkMarketplaceUpdates } from './check';
+import { quarantineCorruptRegistryExtensions } from './quarantine';
 import { listExtensionVersions } from './versions';
 
 function requireAdmin(req: Request, res: Response): boolean {
@@ -137,6 +138,41 @@ export default {
 					hostVersion: typeof body.host === 'string' ? body.host : undefined,
 				});
 				res.json({ data });
+			} catch (error) {
+				if ((error as { status?: number })?.status) {
+					sendError(res, error);
+					return;
+				}
+				next(error);
+			}
+		});
+
+		router.post('/repair', async (req: Request, res: Response, next: NextFunction) => {
+			try {
+				if (!requireAdmin(req, res)) return;
+				if (typeof services.ExtensionsService !== 'function') {
+					res.status(501).json({
+						errors: [
+							{
+								message: 'Marketplace updates require Directus 10.10 or newer',
+								extensions: { code: 'UNSUPPORTED' },
+							},
+						],
+					});
+					return;
+				}
+
+				const schema = await getSchema();
+				const extensionsService = new services.ExtensionsService({
+					accountability: (req as any).accountability,
+					schema,
+				});
+				const data = await quarantineCorruptRegistryExtensions({
+					database,
+					env,
+					extensionsService,
+				});
+				res.json({ data: { disabled: data } });
 			} catch (error) {
 				if ((error as { status?: number })?.status) {
 					sendError(res, error);
