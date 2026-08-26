@@ -41,6 +41,8 @@ export type ExtensionUpdateItem = {
 	 * Directus cannot bundle App extensions until this package is disabled or replaced.
 	 */
 	installed_blocked_reason?: string;
+	/** DB row exists but `.registry/<folder>/package.json` is gone (interrupted install). */
+	files_missing?: boolean;
 };
 
 export type UpdateCheckResponse = {
@@ -49,6 +51,7 @@ export type UpdateCheckResponse = {
 	update_count: number;
 	host_mismatch_count: number;
 	corrupt_count: number;
+	corrupt_names: string[];
 	items: ExtensionUpdateItem[];
 };
 
@@ -59,6 +62,8 @@ export type UpdateApplyResponse = {
 	to_version: string;
 	reload_required: boolean;
 	self_update: boolean;
+	/** `started` = HTTP returned before native uninstall/install finished. */
+	status?: 'started' | 'complete';
 };
 
 export type ExtensionVersionOption = {

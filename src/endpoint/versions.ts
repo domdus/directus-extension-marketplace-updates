@@ -2,7 +2,7 @@ import type { ApiOutput } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
 import { normalizeVersion } from '../shared/semver';
 import type { ExtensionVersionListResponse, ExtensionVersionOption } from '../shared/types';
-import { assertMarketplacePackageIntegrity } from './package-integrity';
+import { assertMarketplacePackageIntegrity, inspectInstalledPackage } from './package-integrity';
 import { describeExtension, resolveRegistryBase } from './registry';
 
 type ExtensionsServiceLike = {
@@ -38,6 +38,8 @@ export async function listExtensionVersions(options: {
 	const described = await describeExtension(options.extensionId, registry, true);
 	const versions = Array.isArray(described.versions) ? described.versions : [];
 	const currentVersionId = String(current.meta?.folder || '');
+	const disk = inspectInstalledPackage(options.env, currentVersionId);
+	const filesMissing = Boolean(disk.error) || disk.missing.length > 0;
 	let currentVersion = schemaVersion(current);
 	const installedRelease = versions.find((version) => version.id === currentVersionId);
 	if (installedRelease?.version) currentVersion = installedRelease.version;
@@ -53,7 +55,7 @@ export async function listExtensionVersions(options: {
 			installable: false,
 		};
 
-		if (option.is_current) {
+		if (option.is_current && !filesMissing) {
 			option.installable = false;
 			optionsOut.push(option);
 			continue;

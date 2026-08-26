@@ -1,4 +1,5 @@
 import { userHasAdminAccess } from '../shared/admin';
+import { escapeHtml, formatNameList } from '../shared/format';
 
 const FLAG = '__extensionUpdatesStudioInjectorInstalled';
 const STYLE_ID = 'eu-studio-injector-styles';
@@ -10,6 +11,7 @@ type CheckPayload = {
 	update_count?: number;
 	host_mismatch_count?: number;
 	corrupt_count?: number;
+	corrupt_names?: string[];
 	host_version?: string | null;
 };
 
@@ -267,6 +269,7 @@ async function loadUpdateCount(): Promise<CheckPayload | null> {
 			update_count: data.update_count,
 			host_mismatch_count: data.host_mismatch_count,
 			corrupt_count: data.corrupt_count,
+			corrupt_names: Array.isArray(data.corrupt_names) ? data.corrupt_names : [],
 			host_version: data.host_version,
 		};
 	} catch {
@@ -277,12 +280,22 @@ async function loadUpdateCount(): Promise<CheckPayload | null> {
 function formatSummary(data: CheckPayload): string {
 	const parts: string[] = [];
 	const corrupt = Number(data.corrupt_count || 0);
+	const names = (data.corrupt_names || []).filter(Boolean);
 	if (corrupt) {
-		parts.push(
-			corrupt === 1
-				? '1 Marketplace package was disabled because it is corrupt'
-				: `${corrupt} Marketplace packages were disabled because they are corrupt`,
-		);
+		const listed = formatNameList(names);
+		if (corrupt === 1) {
+			parts.push(
+				listed
+					? `${listed} was disabled because its files are incomplete`
+					: '1 Marketplace package was disabled because its files are incomplete',
+			);
+		} else {
+			parts.push(
+				listed
+					? `${listed} were disabled because their files are incomplete`
+					: `${corrupt} Marketplace packages were disabled because their files are incomplete`,
+			);
+		}
 	}
 	const count = Number(data.update_count || 0);
 	if (count) {
@@ -332,7 +345,7 @@ async function injectBanner(): Promise<void> {
 		const el = document.createElement('div');
 		el.setAttribute(BANNER_ATTR, '1');
 		el.className = corrupt ? 'eu-ext-banner danger' : 'eu-ext-banner';
-		const label = formatSummary(data);
+		const label = escapeHtml(formatSummary(data));
 		el.innerHTML = `<span>${label}</span><a href="${updatesPath()}">Review updates</a>`;
 		const review = el.querySelector('a');
 		if (review) review.addEventListener('click', navigateToUpdates);

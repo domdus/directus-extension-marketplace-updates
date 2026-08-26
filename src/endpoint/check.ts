@@ -150,7 +150,10 @@ export async function checkMarketplaceUpdates(options: {
 
 		if (currentVersionId) {
 			const inspected = inspectInstalledPackage(options.env, currentVersionId);
-			if (inspected.missing.length) {
+			if (inspected.error === 'missing package.json' || inspected.error === 'invalid package.json') {
+				base.files_missing = true;
+				base.installed_blocked_reason = 'Installed files are missing';
+			} else if (inspected.missing.length) {
 				base.installed_blocked_reason = `Installed package is missing ${inspected.missing.join(', ')}`;
 			}
 		}
@@ -202,12 +205,14 @@ export async function checkMarketplaceUpdates(options: {
 	});
 
 	const sorted = sortItems(items);
+	const corruptItems = sorted.filter((item) => item.installed_blocked_reason && !item.files_missing);
 	const data: UpdateCheckResponse = {
 		host_version: hostVersion,
 		checked_at: new Date().toISOString(),
 		update_count: sorted.filter((item) => item.has_update).length,
 		host_mismatch_count: sorted.filter((item) => item.has_update && item.host_mismatch).length,
-		corrupt_count: sorted.filter((item) => item.installed_blocked_reason).length,
+		corrupt_count: corruptItems.length,
+		corrupt_names: corruptItems.map((item) => item.name),
 		items: sorted,
 	};
 

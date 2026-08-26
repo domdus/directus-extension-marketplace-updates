@@ -41,6 +41,9 @@ export async function quarantineCorruptRegistryExtensions(options: {
 			const folder = String(row.folder || '');
 			if (!folder) continue;
 			const inspected = inspectInstalledPackage(options.env, folder);
+			if (inspected.error === 'missing package.json' || inspected.error === 'invalid package.json') {
+				continue;
+			}
 			if (!inspected.missing.length) continue;
 			broken.push({
 				id: String(row.id),

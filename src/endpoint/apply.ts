@@ -6,6 +6,7 @@ import { invalidateUpdateCache } from './check';
 import {
 	assertInstalledPackageOnDisk,
 	assertMarketplacePackageIntegrity,
+	inspectInstalledPackage,
 	invalidateIntegrityCache,
 } from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
@@ -14,7 +15,21 @@ type ExtensionsServiceLike = {
 	readOne: (id: string) => Promise<ApiOutput>;
 	install: (extensionId: string, versionId: string) => Promise<void>;
 	uninstall: (id: string) => Promise<void>;
+	reinstall?: (id: string) => Promise<void>;
 	updateOne: (id: string, data: { meta: { enabled: boolean } }) => Promise<ApiOutput>;
+};
+
+type LoggerLike = { error: (message: string) => void; warn?: (message: string) => void };
+
+export type ApplyPlan = {
+	extensionsService: ExtensionsServiceLike;
+	env: Record<string, unknown>;
+	extensionId: string;
+	targetId: string;
+	previousVersionId: string;
+	wasEnabled: boolean;
+	reinstallSame: boolean;
+	response: UpdateApplyResponse;
 };
 
 let applying = false;
@@ -34,14 +49,40 @@ function isSelf(entry: ApiOutput): boolean {
 	return schemaName(entry) === EXTENSION_PACKAGE_NAME;
 }
 
-export async function applyMarketplaceUpdate(options: {
+export function readInstallStatus(
+	entry: ApiOutput,
+	env?: Record<string, unknown>,
+): {
+	id: string;
+	current_version: string;
+	current_version_id: string;
+	files_ok: boolean;
+} {
+	const current_version_id = String(entry.meta?.folder || '');
+	const inspected = current_version_id
+		? inspectInstalledPackage(env, current_version_id)
+		: { missing: ['package.json'], error: 'missing package.json' as const };
+	const files_ok = !inspected.error && inspected.missing.length === 0;
+	return {
+		id: entry.id,
+		current_version: schemaVersion(entry),
+		current_version_id,
+		files_ok,
+	};
+}
+
+/**
+ * Validate and integrity-check only. The native uninstall/install that follows
+ * reloads every API extension (~45s+) and would otherwise hold the HTTP request
+ * past reverse-proxy timeouts.
+ */
+export async function prepareMarketplaceUpdate(options: {
 	extensionsService: ExtensionsServiceLike;
 	env: Record<string, unknown>;
 	extensionId: string;
-	/** When set, install this Marketplace version (upgrade or downgrade). */
 	versionId?: string | null;
 	hostVersion?: string | null;
-}): Promise<UpdateApplyResponse> {
+}): Promise<ApplyPlan> {
 	if (applying) {
 		throw Object.assign(new Error('An update is already in progress'), { status: 409 });
 	}
@@ -59,8 +100,6 @@ export async function applyMarketplaceUpdate(options: {
 		}
 
 		const registry = resolveRegistryBase(options.env);
-		// hostVersion is accepted for API compatibility; declared Marketplace host ranges
-		// are advisory only and do not gate which version is installed.
 		readHostVersion(options.env, options.hostVersion || undefined);
 		const described = await describeExtension(options.extensionId, registry, true);
 		const versions = Array.isArray(described.versions) ? described.versions : [];
@@ -83,48 +122,65 @@ export async function applyMarketplaceUpdate(options: {
 		const previousVersionId = String(current.meta.folder);
 		const wasEnabled = Boolean(current.meta.enabled);
 		const selfUpdate = isSelf(current);
+		const disk = inspectInstalledPackage(options.env, previousVersionId);
+		const filesMissing = Boolean(disk.error) || disk.missing.length > 0;
+		const reinstallSame = target.id === previousVersionId && filesMissing;
 
-		if (target.id === previousVersionId) {
+		if (target.id === previousVersionId && !filesMissing) {
 			throw Object.assign(new Error(`Version ${target.version} is already installed`), { status: 400 });
 		}
 
-		// Default "Update" path only moves forward unless a specific version was chosen.
-		if (!requestedId && compareSemver(target.version, fromVersion) <= 0) {
+		if (!requestedId && !filesMissing && compareSemver(target.version, fromVersion) <= 0) {
 			throw Object.assign(new Error('This extension is already up to date'), { status: 400 });
 		}
 
-		// Refuse corrupt Marketplace publishes BEFORE uninstall (e.g. missing dist/).
 		await assertMarketplacePackageIntegrity(registry, target.id, { force: true });
 
-		/**
-		 * Native Directus has no “switch version” API:
-		 *   install()   → insert DB row (folder = version UUID), then extract tarball
-		 *   reinstall() → re-extract the SAME folder UUID (no version change)
-		 *   uninstall() → delete DB row, then delete `.registry/<folder>`
-		 *
-		 * Switching versions therefore has to be uninstall + install. That is unsafe
-		 * if install() “succeeds” with an incomplete tarball (core only checks that
-		 * package.json has a type — not that `directus:extension.path` exists).
-		 *
-		 * Rollback must uninstall the failed/new row first: a second install() would
-		 * otherwise hit a unique constraint on `directus_extensions.id` and leave a
-		 * ghost `.registry/<new-uuid>` that breaks the whole Studio app bundle.
-		 */
+		return {
+			extensionsService: options.extensionsService,
+			env: options.env,
+			extensionId: options.extensionId,
+			targetId: target.id,
+			previousVersionId,
+			wasEnabled,
+			reinstallSame,
+			response: {
+				id: options.extensionId,
+				name: described.name || schemaName(current),
+				from_version: fromVersion,
+				to_version: target.version,
+				reload_required: true,
+				self_update: selfUpdate,
+				status: 'started',
+			},
+		};
+	} catch (error) {
+		applying = false;
+		throw error;
+	}
+}
+
+export async function finalizeMarketplaceUpdate(plan: ApplyPlan, logger?: LoggerLike): Promise<void> {
+	try {
 		let swapped = false;
 		try {
-			swapped = true;
-			await options.extensionsService.uninstall(options.extensionId);
-			await options.extensionsService.install(options.extensionId, target.id);
-			assertInstalledPackageOnDisk(options.env, target.id);
+			if (plan.reinstallSame && typeof plan.extensionsService.reinstall === 'function') {
+				await plan.extensionsService.reinstall(plan.extensionId);
+			} else {
+				swapped = true;
+				await plan.extensionsService.uninstall(plan.extensionId);
+				await plan.extensionsService.install(plan.extensionId, plan.targetId);
+			}
+			assertInstalledPackageOnDisk(plan.env, plan.targetId);
 		} catch (error) {
 			if (swapped) {
 				try {
-					await options.extensionsService.uninstall(options.extensionId);
+					await plan.extensionsService.uninstall(plan.extensionId);
 				} catch {
 					// already gone, or never created
 				}
 				try {
-					await options.extensionsService.install(options.extensionId, previousVersionId);
+					await plan.extensionsService.install(plan.extensionId, plan.previousVersionId);
 				} catch {
 					// original error is more useful
 				}
@@ -132,26 +188,26 @@ export async function applyMarketplaceUpdate(options: {
 			throw error;
 		}
 
-		if (!wasEnabled) {
+		if (plan.reinstallSame) {
 			try {
-				await options.extensionsService.updateOne(options.extensionId, { meta: { enabled: false } });
+				await plan.extensionsService.updateOne(plan.extensionId, { meta: { enabled: true } });
+			} catch {
+				// reinstall succeeded; enable is best-effort
+			}
+		} else if (!plan.wasEnabled) {
+			try {
+				await plan.extensionsService.updateOne(plan.extensionId, { meta: { enabled: false } });
 			} catch {
 				// install succeeded; enabled-state restore is best-effort
 			}
 		}
-
-		invalidateUpdateCache();
-		invalidateIntegrityCache();
-
-		return {
-			id: options.extensionId,
-			name: described.name || schemaName(current),
-			from_version: fromVersion,
-			to_version: target.version,
-			reload_required: true,
-			self_update: selfUpdate,
-		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logger?.error(`[extension-updates] Apply failed for ${plan.extensionId}: ${message}`);
+		throw error;
 	} finally {
 		applying = false;
+		invalidateUpdateCache();
+		invalidateIntegrityCache();
 	}
 }

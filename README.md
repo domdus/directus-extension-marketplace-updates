@@ -63,7 +63,8 @@ npm run build
 - Latest **npm** and latest **Marketplace** can differ. Apply always uses the Marketplace version UUID, not npm.
 - Declared Marketplace `host_version` ranges are **advisory only**. Publishers often leave them outdated, so a mismatch does not block Update.
 - Packages that fail integrity (for example missing `dist/index.js`) are blocked on Update / Update all and marked **Update blocked** when latest is corrupt but your install is fine.
-- Updating this checker itself unloads its API mid-flight in theory; the handler stays in memory for the request, then you must reload. Apply other extensions first when both need updates.
+- Native uninstall/install reloads **all** API extensions twice per package (often 45–60s). `/apply` returns **202** after the integrity check and installs in the background so reverse proxies do not time out the request. The Studio page polls `/status` until the new version is on disk, then continues.
+- Updating this checker itself is applied last. Reload the Data Studio afterwards.
 
 ## License
 

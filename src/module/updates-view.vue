@@ -45,10 +45,18 @@
 
 			<div v-else-if="summary" class="result">
 				<v-notice v-if="summary.corrupt_count" type="danger" class="result">
-					{{ summary.corrupt_count }} Marketplace package<template v-if="summary.corrupt_count !== 1">s were</template>
-					<template v-else> was</template>
-					disabled because the installed files are incomplete. Use Choose Version to install a complete
-					release, then enable it again.
+					<template v-if="corruptNames.length">
+						{{ formatNameList(corruptNames) }}
+						<template v-if="corruptNames.length === 1"> was</template>
+						<template v-else> were</template>
+						disabled because the installed files are incomplete.
+					</template>
+					<template v-else>
+						{{ summary.corrupt_count }} Marketplace package<template v-if="summary.corrupt_count !== 1">s were</template>
+						<template v-else> was</template>
+						disabled because the installed files are incomplete.
+					</template>
+					Use Choose Version to install a complete release, then enable it again.
 				</v-notice>
 				<v-notice :type="summaryType">
 					<template v-if="summary.update_count">
@@ -80,7 +88,8 @@
 					<div class="ext-title">
 						<strong>{{ item.name }}</strong>
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
-						<v-chip v-if="item.installed_blocked_reason" small class="state warning">Corrupt install</v-chip>
+						<v-chip v-if="item.files_missing" small class="state warning">Missing files</v-chip>
+						<v-chip v-else-if="item.installed_blocked_reason" small class="state warning">Corrupt install</v-chip>
 						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
@@ -93,7 +102,11 @@
 						</template>
 						<template v-if="item.is_self"> · This checker</template>
 					</p>
-					<p v-if="item.installed_blocked_reason" class="ext-error">
+					<p v-if="item.files_missing" class="ext-error">
+						The files for this extension are gone, so Marketplace offers Install instead of Manage.
+						Reinstall this version to restore them, then enable it if it is still disabled.
+					</p>
+					<p v-else-if="item.installed_blocked_reason" class="ext-error">
 						{{ item.installed_blocked_reason }}. Disabled so other Studio extensions can load. Use Choose
 						Version to install a complete release, then enable it again.
 					</p>
@@ -107,6 +120,15 @@
 					</p>
 				</div>
 				<div class="ext-actions">
+					<v-button
+						v-if="item.files_missing"
+						small
+						:loading="applyingId === item.id"
+						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
+						@click="runReinstall(item)"
+					>
+						Reinstall
+					</v-button>
 					<v-button
 						v-if="item.has_update"
 						small
@@ -177,12 +199,13 @@
 								current: version.is_current,
 								blocked: !version.installable && !version.is_current,
 							}"
-							:disabled="version.is_current || !version.installable || Boolean(applyingId)"
+							:disabled="!version.installable || Boolean(applyingId)"
 							@click="confirmInstallVersion(version)"
 						>
 							<div class="version-row-main">
 								<strong>{{ version.version }}</strong>
-								<v-chip v-if="version.is_current" small class="state enabled">Installed</v-chip>
+								<v-chip v-if="version.is_current && version.installable" small class="state warning">Reinstall</v-chip>
+								<v-chip v-else-if="version.is_current" small class="state enabled">Installed</v-chip>
 								<v-chip v-else-if="!version.installable" small class="state">Blocked</v-chip>
 								<v-chip
 									v-else-if="isNewerThanInstalled(version.version)"
@@ -212,10 +235,19 @@
 		<v-dialog v-model="confirmVersionOpen" @esc="confirmVersionOpen = false">
 			<v-card>
 				<v-card-title>
-					Install {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
+					<template v-if="pendingVersion?.is_current">
+						Reinstall {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
+					</template>
+					<template v-else>
+						Install {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
+					</template>
 				</v-card-title>
 				<v-card-text>
-					<p>
+					<p v-if="pendingVersion?.is_current">
+						This restores the missing files for {{ pendingVersion?.version }}. Your project settings are
+						kept. You’ll be asked to refresh the page when it’s done.
+					</p>
+					<p v-else>
 						This uninstalls {{ versionList?.current_version || versionTarget?.current_version }} and
 						installs {{ pendingVersion?.version }}. Config stored in project settings is kept. The
 						Data Studio will need a reload afterwards.
@@ -226,15 +258,26 @@
 				</v-card-text>
 				<v-card-actions>
 					<v-button secondary @click="confirmVersionOpen = false">Cancel</v-button>
-					<v-button :loading="Boolean(applyingId)" @click="runInstallVersion">Install</v-button>
+					<v-button :loading="Boolean(applyingId)" @click="runInstallVersion">
+						<template v-if="pendingVersion?.is_current">Reinstall</template>
+						<template v-else>Install</template>
+					</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
 
-		<v-dialog v-model="confirmAllOpen" @esc="!updatingAll && (confirmAllOpen = false)">
+		<v-dialog
+			:model-value="confirmAllOpen"
+			persistent
+			@update:model-value="onConfirmAllOpenChange"
+			@esc="onCancelUpdateAll"
+		>
 			<v-card>
 				<v-card-title>
-					<template v-if="updatingAll && bulkProgress">
+					<template v-if="updatingAll && cancelAllRequested">
+						Stopping…
+					</template>
+					<template v-else-if="updatingAll && bulkProgress">
 						Updating extensions…
 					</template>
 					<template v-else>
@@ -245,16 +288,19 @@
 				</v-card-title>
 				<v-card-text>
 					<p v-if="updatingAll && bulkProgress" class="bulk-progress">
-						Updating {{ bulkProgress.name }} ({{ bulkProgress.current }}/{{ bulkProgress.total }})…
+						<template v-if="cancelAllRequested">
+							Finishing {{ bulkProgress.name }}, then stopping…
+						</template>
+						<template v-else>
+							Updating {{ bulkProgress.name }} ({{ bulkProgress.current }}/{{ bulkProgress.total }})…
+							This can take a moment.
+						</template>
 					</p>
 					<template v-else>
 						<p>
-							Each extension is uninstalled and reinstalled at its latest Marketplace version, one at a
-							time. Config in project settings is kept. The Data Studio will need a reload afterwards.
-						</p>
-						<p v-if="updateTargets.some((item) => item.host_mismatch)" class="dialog-note">
-							Some releases declare a host range that does not match this Directus. Publishers often
-							leave that field outdated — proceed if you trust those releases.
+							Each extension will be updated to its latest Marketplace version, one at a time. This can
+							take a moment. Your project settings are kept. You’ll be asked to refresh the page when
+							it’s done.
 						</p>
 						<p v-if="updateTargets.some((item) => item.is_self)" class="dialog-note">
 							This checker is included and will be applied last.
@@ -262,7 +308,14 @@
 					</template>
 				</v-card-text>
 				<v-card-actions>
-					<v-button secondary :disabled="updatingAll" @click="confirmAllOpen = false">Cancel</v-button>
+					<v-button
+						secondary
+						:disabled="updatingAll && cancelAllRequested"
+						@click="onCancelUpdateAll"
+					>
+						<template v-if="updatingAll && cancelAllRequested">Stopping…</template>
+						<template v-else>Cancel</template>
+					</v-button>
 					<v-button :loading="updatingAll" :disabled="updatingAll" @click="runUpdateAll">
 						Update all
 					</v-button>
@@ -280,6 +333,9 @@
 						>.
 						<template v-if="bulkResult.failed">
 							{{ bulkResult.failed }} failed.
+						</template>
+						<template v-if="bulkResult.skipped">
+							{{ bulkResult.skipped }} skipped.
 						</template>
 						Reload the Data Studio to load the new versions.
 					</template>
@@ -302,6 +358,19 @@ import { computed, onMounted, ref } from 'vue';
 import { useApi, useStores } from '@directus/extensions-sdk';
 import { usePageClass } from './composables/use-page-class';
 import ModuleNavigation from './navigation.vue';
+import {
+	apiErrorMessage,
+	APPLY_POST_TIMEOUT_MS,
+	isConflict,
+	isNotFound,
+	isRouteNotFound,
+	isTransportError,
+	RELOAD_ROUTE_TIMEOUT_MS,
+	SETTLE_TIMEOUT_MS,
+	sleep,
+	withRouteRetry,
+} from './route-retry';
+import { formatNameList } from '../shared/format';
 import { compareSemver } from '../shared/semver';
 import type {
 	ExtensionUpdateItem,
@@ -320,6 +389,7 @@ const serverStore = useServerStore();
 const checking = ref(false);
 const applyingId = ref<string | null>(null);
 const updatingAll = ref(false);
+const cancelAllRequested = ref(false);
 const loadingVersions = ref(false);
 const errorMessage = ref<string | null>(null);
 const versionError = ref<string | null>(null);
@@ -335,7 +405,7 @@ const versionTarget = ref<ExtensionUpdateItem | null>(null);
 const versionList = ref<ExtensionVersionListResponse | null>(null);
 const pendingVersion = ref<ExtensionVersionOption | null>(null);
 const appliedVersion = ref('');
-const bulkResult = ref<{ succeeded: number; failed: number } | null>(null);
+const bulkResult = ref<{ succeeded: number; failed: number; skipped: number } | null>(null);
 const bulkProgress = ref<{ current: number; total: number; name: string } | null>(null);
 
 const summaryType = computed(() => {
@@ -350,6 +420,11 @@ const updateTargets = computed(() => {
 	const others = pendingItems.filter((item) => !item.is_self);
 	const self = pendingItems.filter((item) => item.is_self);
 	return [...others, ...self];
+});
+
+const corruptNames = computed(() => {
+	if (summary.value?.corrupt_names?.length) return summary.value.corrupt_names;
+	return items.value.filter((item) => item.installed_blocked_reason).map((item) => item.name);
 });
 
 function formatType(type: string) {
@@ -372,19 +447,68 @@ function hostParam() {
 	return serverStore?.info?.version || undefined;
 }
 
-async function load(force = false) {
+async function waitForCheckerRoute() {
+	await sleep(800);
+	await withRouteRetry(
+		() => api.get('/extension-updates/ping', { timeout: 8_000 }),
+		{ timeoutMs: RELOAD_ROUTE_TIMEOUT_MS },
+	);
+}
+
+async function waitUntilApplied(
+	extensionId: string,
+	targetVersionId: string,
+	expectedVersion: string,
+	timeoutMs = SETTLE_TIMEOUT_MS,
+): Promise<string> {
+	const started = Date.now();
+	let lastError: unknown;
+
+	while (Date.now() - started < timeoutMs) {
+		try {
+			const res = await api.get(`/extension-updates/status/${encodeURIComponent(extensionId)}`, {
+				timeout: 8_000,
+			});
+			const row = res.data?.data as {
+				current_version?: string;
+				current_version_id?: string;
+				files_ok?: boolean;
+			} | undefined;
+			if (!row?.files_ok) continue;
+			if (targetVersionId && row.current_version_id === targetVersionId) {
+				return row.current_version || expectedVersion;
+			}
+			if (expectedVersion && row.current_version === expectedVersion) {
+				return expectedVersion;
+			}
+		} catch (error) {
+			lastError = error;
+			if (!isRouteNotFound(error) && !isNotFound(error) && !isTransportError(error)) {
+				throw error;
+			}
+		}
+		await sleep(1_500);
+	}
+
+	throw lastError || new Error('Timed out waiting for Directus to finish installing that extension');
+}
+
+async function load(force = false, waitForRouteMs?: number) {
 	checking.value = true;
 	errorMessage.value = null;
 	try {
-		const res = await api.get('/extension-updates/check', {
-			params: { force: force ? '1' : undefined, host: hostParam() },
-		});
+		const res = await withRouteRetry(
+			() =>
+				api.get('/extension-updates/check', {
+					params: { force: force ? '1' : undefined, host: hostParam() },
+				}),
+			{ timeoutMs: waitForRouteMs ?? (force ? RELOAD_ROUTE_TIMEOUT_MS : undefined) },
+		);
 		const data = (res.data?.data || null) as UpdateCheckResponse | null;
 		summary.value = data;
 		items.value = data?.items || [];
-	} catch (error: any) {
-		errorMessage.value =
-			error?.response?.data?.errors?.[0]?.message || error?.message || 'Update check failed';
+	} catch (error: unknown) {
+		errorMessage.value = apiErrorMessage(error, 'Update check failed');
 		summary.value = null;
 		items.value = [];
 	} finally {
@@ -402,7 +526,24 @@ function confirmUpdateAll() {
 	if (!updateTargets.value.length) return;
 	bulkResult.value = null;
 	bulkProgress.value = null;
+	cancelAllRequested.value = false;
 	confirmAllOpen.value = true;
+}
+
+function onCancelUpdateAll() {
+	if (!updatingAll.value) {
+		confirmAllOpen.value = false;
+		return;
+	}
+	cancelAllRequested.value = true;
+}
+
+function onConfirmAllOpenChange(open: boolean) {
+	if (open) {
+		confirmAllOpen.value = true;
+		return;
+	}
+	onCancelUpdateAll();
 }
 
 async function openVersionPicker(item: ExtensionUpdateItem) {
@@ -413,11 +554,13 @@ async function openVersionPicker(item: ExtensionUpdateItem) {
 	versionPickerOpen.value = true;
 	loadingVersions.value = true;
 	try {
-		const res = await api.get(`/extension-updates/versions/${encodeURIComponent(item.id)}`);
+		const res = await withRouteRetry(
+			() => api.get(`/extension-updates/versions/${encodeURIComponent(item.id)}`),
+			{ timeoutMs: RELOAD_ROUTE_TIMEOUT_MS },
+		);
 		versionList.value = (res.data?.data || null) as ExtensionVersionListResponse | null;
-	} catch (error: any) {
-		versionError.value =
-			error?.response?.data?.errors?.[0]?.message || error?.message || 'Could not load versions';
+	} catch (error: unknown) {
+		versionError.value = apiErrorMessage(error, 'Could not load versions');
 	} finally {
 		loadingVersions.value = false;
 	}
@@ -431,18 +574,67 @@ function closeVersionPicker() {
 }
 
 function confirmInstallVersion(version: ExtensionVersionOption) {
-	if (!version.installable || version.is_current) return;
+	if (!version.installable) return;
 	pendingVersion.value = version;
 	confirmVersionOpen.value = true;
 }
 
-async function applyOne(item: ExtensionUpdateItem, versionId?: string) {
-	const res = await api.post('/extension-updates/apply', {
-		extension: item.id,
-		version: versionId || undefined,
-		host: hostParam(),
-	});
-	return res.data?.data?.to_version || versionId || item.latest_version || '';
+async function applyOne(item: ExtensionUpdateItem, versionId?: string, expectedVersion?: string) {
+	const targetVersionId = versionId || item.latest_version_id || '';
+	const expected = expectedVersion || item.latest_version || '';
+	let lastError: unknown;
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		await waitForCheckerRoute();
+		try {
+			const res = await api.post(
+				'/extension-updates/apply',
+				{
+					extension: item.id,
+					version: versionId || undefined,
+					host: hostParam(),
+				},
+				{ timeout: APPLY_POST_TIMEOUT_MS },
+			);
+			const toVersion = res.data?.data?.to_version || expected;
+			return await waitUntilApplied(item.id, targetVersionId, toVersion);
+		} catch (error) {
+			lastError = error;
+			if (isConflict(error)) {
+				return await waitUntilApplied(item.id, targetVersionId, expected);
+			}
+			if (isRouteNotFound(error)) {
+				try {
+					return await waitUntilApplied(item.id, targetVersionId, expected, 20_000);
+				} catch {
+					continue;
+				}
+			}
+			if (isTransportError(error)) {
+				return await waitUntilApplied(item.id, targetVersionId, expected);
+			}
+			throw error;
+		}
+	}
+
+	throw lastError || new Error('Update failed');
+}
+
+async function runReinstall(item: ExtensionUpdateItem) {
+	if (!item.current_version_id) return;
+	applyingId.value = item.id;
+	errorMessage.value = null;
+	bulkResult.value = null;
+	try {
+		appliedVersion.value = await applyOne(item, item.current_version_id, item.current_version);
+		pending.value = item;
+		reloadOpen.value = true;
+		await load(true, RELOAD_ROUTE_TIMEOUT_MS);
+	} catch (error: unknown) {
+		errorMessage.value = apiErrorMessage(error, 'Reinstall failed');
+	} finally {
+		applyingId.value = null;
+	}
 }
 
 async function runUpdate() {
@@ -455,10 +647,9 @@ async function runUpdate() {
 		appliedVersion.value = await applyOne(item);
 		confirmOpen.value = false;
 		reloadOpen.value = true;
-		await load(true);
-	} catch (error: any) {
-		errorMessage.value =
-			error?.response?.data?.errors?.[0]?.message || error?.message || 'Update failed';
+		await load(true, RELOAD_ROUTE_TIMEOUT_MS);
+	} catch (error: unknown) {
+		errorMessage.value = apiErrorMessage(error, 'Update failed');
 		confirmOpen.value = false;
 	} finally {
 		applyingId.value = null;
@@ -473,15 +664,14 @@ async function runInstallVersion() {
 	errorMessage.value = null;
 	bulkResult.value = null;
 	try {
-		appliedVersion.value = await applyOne(item, version.id);
+		appliedVersion.value = await applyOne(item, version.id, version.version);
 		confirmVersionOpen.value = false;
 		versionPickerOpen.value = false;
 		pending.value = item;
 		reloadOpen.value = true;
-		await load(true);
-	} catch (error: any) {
-		errorMessage.value =
-			error?.response?.data?.errors?.[0]?.message || error?.message || 'Install failed';
+		await load(true, RELOAD_ROUTE_TIMEOUT_MS);
+	} catch (error: unknown) {
+		errorMessage.value = apiErrorMessage(error, 'Install failed');
 		confirmVersionOpen.value = false;
 	} finally {
 		applyingId.value = null;
@@ -496,14 +686,20 @@ async function runUpdateAll() {
 	}
 
 	updatingAll.value = true;
+	cancelAllRequested.value = false;
 	errorMessage.value = null;
 	bulkProgress.value = null;
 	let succeeded = 0;
 	let failed = 0;
+	let skipped = 0;
 	let lastError: string | null = null;
 
 	try {
 		for (let index = 0; index < queue.length; index++) {
+			if (cancelAllRequested.value) {
+				skipped = queue.length - index;
+				break;
+			}
 			const item = queue[index]!;
 			bulkProgress.value = {
 				current: index + 1,
@@ -514,24 +710,24 @@ async function runUpdateAll() {
 			try {
 				await applyOne(item);
 				succeeded += 1;
-			} catch (error: any) {
+			} catch (error: unknown) {
 				failed += 1;
-				lastError =
-					error?.response?.data?.errors?.[0]?.message || error?.message || 'Update failed';
+				lastError = apiErrorMessage(error, 'Update failed');
 				break;
 			}
 		}
 	} finally {
 		applyingId.value = null;
 		updatingAll.value = false;
+		cancelAllRequested.value = false;
 		bulkProgress.value = null;
 		confirmAllOpen.value = false;
 	}
 
-	await load(true);
+	await load(true, RELOAD_ROUTE_TIMEOUT_MS);
 
-	if (succeeded) {
-		bulkResult.value = { succeeded, failed };
+	if (succeeded || skipped) {
+		bulkResult.value = { succeeded, failed, skipped };
 		pending.value = null;
 		appliedVersion.value = '';
 		reloadOpen.value = true;

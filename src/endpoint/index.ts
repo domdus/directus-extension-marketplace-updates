@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction, Router } from 'express';
 import type { ApiExtensionContext } from '@directus/types';
 import { accountabilityIsAdmin } from '../shared/admin';
-import { applyMarketplaceUpdate } from './apply';
+import { finalizeMarketplaceUpdate, prepareMarketplaceUpdate, readInstallStatus } from './apply';
 import { checkMarketplaceUpdates } from './check';
 import { quarantineCorruptRegistryExtensions } from './quarantine';
 import { listExtensionVersions } from './versions';
@@ -25,7 +25,12 @@ function sendError(res: Response, error: unknown) {
 export default {
 	id: 'extension-updates',
 	handler: (router: Router, context: ApiExtensionContext) => {
-		const { services, getSchema, env, database } = context;
+		const { services, getSchema, env, database, logger } = context;
+
+		router.get('/ping', async (req: Request, res: Response) => {
+			if (!requireAdmin(req, res)) return;
+			res.json({ data: { ok: true } });
+		});
 
 		router.get('/check', async (req: Request, res: Response, next: NextFunction) => {
 			try {
@@ -59,6 +64,41 @@ export default {
 				res.json({ data });
 			} catch (error) {
 				next(error);
+			}
+		});
+
+		router.get('/status/:extension', async (req: Request, res: Response) => {
+			try {
+				if (!requireAdmin(req, res)) return;
+				if (typeof services.ExtensionsService !== 'function') {
+					res.status(501).json({
+						errors: [
+							{
+								message: 'Marketplace updates require Directus 10.10 or newer',
+								extensions: { code: 'UNSUPPORTED' },
+							},
+						],
+					});
+					return;
+				}
+
+				const extensionId = String(req.params.extension || '');
+				if (!extensionId) {
+					res.status(400).json({ errors: [{ message: 'extension is required' }] });
+					return;
+				}
+
+				const schema = await getSchema();
+				const extensionsService = new services.ExtensionsService({
+					accountability: (req as any).accountability,
+					schema,
+				});
+				const current = await extensionsService.readOne(extensionId);
+				res.json({ data: readInstallStatus(current, env) });
+			} catch {
+				res.status(404).json({
+					errors: [{ message: 'Extension not found', extensions: { code: 'NOT_FOUND' } }],
+				});
 			}
 		});
 
@@ -130,14 +170,20 @@ export default {
 					accountability: (req as any).accountability,
 					schema,
 				});
-				const data = await applyMarketplaceUpdate({
+				const plan = await prepareMarketplaceUpdate({
 					extensionsService,
 					env,
 					extensionId,
 					versionId: body.version || null,
 					hostVersion: typeof body.host === 'string' ? body.host : undefined,
 				});
-				res.json({ data });
+				res.status(202).json({ data: plan.response });
+				setImmediate(() => {
+					void finalizeMarketplaceUpdate(plan, logger).catch((error: unknown) => {
+						const message = error instanceof Error ? error.message : String(error);
+						logger?.error(`[extension-updates] Background apply failed: ${message}`);
+					});
+				});
 			} catch (error) {
 				if ((error as { status?: number })?.status) {
 					sendError(res, error);
