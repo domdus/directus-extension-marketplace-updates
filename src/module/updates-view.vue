@@ -864,16 +864,12 @@ onMounted(() => {
 	}
 
 	.ext-actions {
-		flex-direction: column;
-		align-items: stretch;
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-items: center;
 		flex-shrink: 1;
 		width: 100%;
-		justify-content: stretch;
-	}
-
-	.ext-actions :deep(.v-button),
-	.ext-actions :deep(.button) {
-		width: 100%;
+		justify-content: flex-end;
 	}
 }
 
