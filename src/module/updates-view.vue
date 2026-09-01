@@ -789,6 +789,7 @@ onMounted(() => {
 
 .ext-row {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 16px;
 	justify-content: space-between;
 	align-items: flex-start;
@@ -798,6 +799,7 @@ onMounted(() => {
 
 .ext-main {
 	min-width: 0;
+	flex: 1 1 12rem;
 }
 
 .ext-title {
@@ -849,6 +851,30 @@ onMounted(() => {
 	gap: 8px;
 	flex-shrink: 0;
 	justify-content: flex-end;
+}
+
+@media (max-width: 600px) {
+	.ext-row {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.ext-main {
+		flex: none;
+	}
+
+	.ext-actions {
+		flex-direction: column;
+		align-items: stretch;
+		flex-shrink: 1;
+		width: 100%;
+		justify-content: stretch;
+	}
+
+	.ext-actions :deep(.v-button),
+	.ext-actions :deep(.button) {
+		width: 100%;
+	}
 }
 
 .type-chip {
