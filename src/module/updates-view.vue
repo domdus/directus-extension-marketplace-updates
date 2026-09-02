@@ -11,32 +11,43 @@
 		<template #sidebar>
 			<sidebar-detail id="about" icon="info" title="About">
 				<p class="sidebar-text">
-					This page compares registry-installed extensions with the Marketplace and applies updates by
-					uninstalling the current version, then installing a chosen Marketplace release. Packages that
-					are missing their built entry files (for example no dist/) are blocked before uninstall. Use
-					<strong>Choose Version</strong> to pick an older or newer release.
+					Marketplace installs are updated through the registry. Local extensions can be
+					replaced from a zip/tgz, or switched to a Marketplace listing when the package.json name
+					matches exactly. Packages missing their built entry files (for example no dist/) are
+					blocked. Installs from <code>node_modules</code> are not managed here.
 				</p>
 			</sidebar-detail>
 		</template>
 
 		<div :class="pageClass">
 			<p class="explain">
-				Only extensions installed from the Marketplace are listed. Local folder and npm
-				(<code>node_modules</code>) installs cannot be updated here.
+				Marketplace extensions update through the registry. Local extensions can be uploaded as a zip or
+				.tgz, and switched to the Marketplace when the package name matches exactly. Installs from
+				<code>node_modules</code> stay package-manager-managed.
 			</p>
 
 			<div class="actions">
-				<v-button secondary :loading="checking" :disabled="updatingAll" @click="load(true)">
-					Check now
+				<v-button secondary :loading="checking" :disabled="updatingAll || uploading" @click="load(true)">
+					Check Now
 				</v-button>
-				<v-button
-					v-if="updateTargets.length"
-					:loading="updatingAll"
-					:disabled="checking || Boolean(applyingId)"
-					@click="confirmUpdateAll"
-				>
-					Update all
-				</v-button>
+				<div class="actions-right">
+					<v-button secondary :loading="uploading" :disabled="checking || updatingAll || Boolean(applyingId)" @click="pickUpload">
+						Upload ZIP
+					</v-button>
+					<v-button
+						v-if="updateTargets.length"
+						:loading="updatingAll"
+						:disabled="checking || uploading || Boolean(applyingId)"
+						@click="confirmUpdateAll"
+					>
+						Update All
+					</v-button>
+				</div>
+			</div>
+
+			<div class="local-toggle">
+				<v-checkbox v-model="showLocalUpdates" :disabled="checking || updatingAll || uploading" />
+				<span>Show Local Extension Updates</span>
 			</div>
 
 			<div v-if="errorMessage" class="result">
@@ -44,7 +55,7 @@
 			</div>
 
 			<div v-else-if="summary" class="result">
-				<v-notice v-if="summary.corrupt_count" type="danger" class="result">
+				<v-notice v-if="visibleCorruptCount" type="danger" class="result">
 					<template v-if="corruptNames.length">
 						{{ formatNameList(corruptNames) }}
 						<template v-if="corruptNames.length === 1"> was</template>
@@ -52,21 +63,21 @@
 						disabled because the installed files are incomplete.
 					</template>
 					<template v-else>
-						{{ summary.corrupt_count }} Marketplace package<template v-if="summary.corrupt_count !== 1">s were</template>
+						{{ visibleCorruptCount }} package<template v-if="visibleCorruptCount !== 1">s were</template>
 						<template v-else> was</template>
 						disabled because the installed files are incomplete.
 					</template>
 					Use Choose Version to install a complete release, then enable it again.
 				</v-notice>
 				<v-notice :type="summaryType">
-					<template v-if="summary.update_count">
-						{{ summary.update_count }} update<template v-if="summary.update_count !== 1">s</template>
+					<template v-if="visibleUpdateCount">
+						{{ visibleUpdateCount }} update<template v-if="visibleUpdateCount !== 1">s</template>
 						available
 					</template>
-					<template v-else>All Marketplace extensions are up to date</template>
-					<template v-if="summary.host_mismatch_count">
-						· {{ summary.host_mismatch_count }} newer release<template
-							v-if="summary.host_mismatch_count !== 1"
+					<template v-else>All listed extensions are up to date</template>
+					<template v-if="visibleHostMismatchCount">
+						· {{ visibleHostMismatchCount }} newer release<template
+							v-if="visibleHostMismatchCount !== 1"
 							>s</template
 						>
 						need a newer Directus
@@ -77,22 +88,44 @@
 				</v-notice>
 			</div>
 
-			<div v-if="!checking && items.length === 0 && !errorMessage" class="result">
+			<div
+				v-if="showLocalUpdates && !checking && localItems.length === 0 && !errorMessage"
+				class="result"
+			>
+				<v-notice type="info">No local extensions were found on this instance.</v-notice>
+			</div>
+
+			<div v-if="!checking && marketplaceItems.length === 0 && !errorMessage && !showLocalUpdates" class="result">
 				<v-notice type="info">
-					No Marketplace-installed extensions were found on this instance.
+					No Marketplace extensions were found on this instance.
 				</v-notice>
 			</div>
 
-			<div v-for="item in items" :key="item.id" class="ext-row">
-				<div class="ext-main">
+			<div v-for="(item, index) in visibleItems" :key="item.id">
+				<p
+					v-if="showLocalUpdates && item.source === 'local' && visibleItems[index - 1]?.source !== 'local'"
+					class="section-label"
+				>
+					Local extensions
+				</p>
+				<p
+					v-if="showLocalUpdates && item.source === 'registry' && visibleItems[index - 1]?.source !== 'registry'"
+					class="section-label"
+				>
+					Marketplace extensions
+				</p>
+				<div class="ext-row">
+					<div class="ext-main">
 					<div class="ext-title">
 						<strong>{{ item.name }}</strong>
+						<v-chip small class="type-chip">{{ item.source === 'local' ? 'Local' : 'Marketplace' }}</v-chip>
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
 						<v-chip v-if="item.files_missing" small class="state warning">Missing files</v-chip>
 						<v-chip v-else-if="item.installed_blocked_reason" small class="state warning">Corrupt install</v-chip>
 						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
+						<v-chip v-else-if="item.source === 'local' && !item.marketplace_id" small class="type-chip">Not on Marketplace</v-chip>
 						<v-chip v-else small class="state enabled">Up to date</v-chip>
 					</div>
 					<p class="ext-meta">
@@ -102,29 +135,45 @@
 						</template>
 						<template v-if="item.is_self"> · This checker</template>
 					</p>
-					<p v-if="item.files_missing" class="ext-error">
+					<p v-if="item.files_missing && item.source === 'registry'" class="ext-error">
 						The files for this extension are gone, so Marketplace offers Install instead of Manage.
 						Reinstall this version to restore them, then enable it if it is still disabled.
 					</p>
+					<p v-else-if="item.files_missing" class="ext-error">
+						The files for this local extension are gone. Upload a zip/tgz to restore them.
+					</p>
 					<p v-else-if="item.installed_blocked_reason" class="ext-error">
-						{{ item.installed_blocked_reason }}. Disabled so other Studio extensions can load. Use Choose
-						Version to install a complete release, then enable it again.
+						{{ item.installed_blocked_reason }}. Disabled so other Studio extensions can load.
+						<template v-if="item.source === 'registry' || item.marketplace_id">
+							Use Choose Version to install a complete release, then enable it again.
+						</template>
+						<template v-else>Upload a complete package, then enable it again.</template>
 					</p>
 					<p v-else-if="item.error" class="ext-error">{{ item.error }}</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
 						Latest {{ item.latest_version }} is corrupt on the Marketplace. Your installed version is fine —
 						use Choose Version for other releases.
 					</p>
+					<p v-else-if="item.source === 'local' && item.has_update" class="ext-note">
+						Marketplace {{ item.latest_version }} is newer. Update switches this local extension to a
+						registry install.
+					</p>
 					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
 						Declared host range {{ item.host_version }} (often outdated — update still allowed).
+					</p>
+					<p v-else-if="item.source === 'local' && !item.marketplace_id" class="ext-note">
+						No Marketplace listing matches this package name — updates are by zip upload only.
+					</p>
+					<p v-else-if="item.source === 'local' && item.marketplace_older" class="ext-note">
+						Marketplace {{ item.latest_version }} is older than this local copy.
 					</p>
 				</div>
 				<div class="ext-actions">
 					<v-button
-						v-if="item.files_missing"
+						v-if="item.files_missing && item.source === 'registry'"
 						small
 						:loading="applyingId === item.id"
-						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
+						:disabled="checking || updatingAll || uploading || Boolean(applyingId) || loadingVersions"
 						@click="runReinstall(item)"
 					>
 						Reinstall
@@ -133,22 +182,41 @@
 						v-if="item.has_update"
 						small
 						:loading="applyingId === item.id"
-						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
+						:disabled="checking || updatingAll || uploading || Boolean(applyingId) || loadingVersions"
 						@click="confirmUpdate(item)"
 					>
 						Update
 					</v-button>
 					<v-button
+						v-if="item.source === 'registry' || item.marketplace_id"
 						small
 						secondary
 						:loading="loadingVersions && versionTarget?.id === item.id"
-						:disabled="checking || updatingAll || Boolean(applyingId) || loadingVersions"
+						:disabled="checking || updatingAll || uploading || Boolean(applyingId) || loadingVersions"
 						@click="openVersionPicker(item)"
 					>
 						Choose Version
 					</v-button>
-					<v-button small secondary :to="item.marketplace_path">Marketplace</v-button>
+					<v-button
+						v-if="item.marketplace_path"
+						v-tooltip="'Marketplace'"
+						class="marketplace-icon"
+						icon
+						small
+						secondary
+						:to="item.marketplace_path"
+					>
+						<v-icon name="storefront" />
+					</v-button>
 				</div>
+				</div>
+			</div>
+
+			<div
+				v-if="showLocalUpdates && !checking && marketplaceItems.length === 0 && !errorMessage"
+				class="result"
+			>
+				<v-notice type="info">No Marketplace extensions were found on this instance.</v-notice>
 			</div>
 		</div>
 
@@ -156,10 +224,18 @@
 			<v-card>
 				<v-card-title>Update {{ pending?.name }}?</v-card-title>
 				<v-card-text>
-					<p>
+					<p v-if="pending?.source === 'local'">
+						This replaces this local extension with Marketplace {{ pending?.latest_version }}.
+						Future updates will use the registry. The Data Studio will need a reload afterwards.
+					</p>
+					<p v-else>
 						This uninstalls {{ pending?.current_version }} and installs
 						{{ pending?.latest_version }}. Config stored in project settings is kept.
 						The Data Studio will need a reload afterwards.
+					</p>
+					<p v-if="pending?.marketplace_older" class="dialog-note">
+						Marketplace {{ pending.latest_version }} is older than local
+						{{ pending.current_version }}.
 					</p>
 					<p v-if="pending?.host_mismatch && pending?.host_version" class="dialog-note">
 						Marketplace lists host range {{ pending.host_version }}, which does not match this
@@ -181,8 +257,14 @@
 				<v-card-title>Choose Version — {{ versionTarget?.name }}</v-card-title>
 				<v-card-text>
 					<p class="version-intro">
-						Installed {{ versionList?.current_version || versionTarget?.current_version }}. Choose any
-						Marketplace release; corrupt packages (missing entry files) are disabled.
+						Installed {{ versionList?.current_version || versionTarget?.current_version }}.
+						<template v-if="versionTarget?.source === 'local'">
+							These are Marketplace releases. Installing one replaces this local extension with a
+							registry install.
+						</template>
+						<template v-else>
+							These are Marketplace releases; corrupt packages (missing entry files) are disabled.
+						</template>
 					</p>
 					<div v-if="loadingVersions" class="version-loading">
 						<v-progress-circular indeterminate />
@@ -204,7 +286,8 @@
 						>
 							<div class="version-row-main">
 								<strong>{{ version.version }}</strong>
-								<v-chip v-if="version.is_current && version.installable" small class="state warning">Reinstall</v-chip>
+								<v-chip v-if="version.is_current && version.installable && versionTarget?.source === 'local'" small class="state warning">Switch</v-chip>
+								<v-chip v-else-if="version.is_current && version.installable" small class="state warning">Reinstall</v-chip>
 								<v-chip v-else-if="version.is_current" small class="state enabled">Installed</v-chip>
 								<v-chip v-else-if="!version.installable" small class="state">Blocked</v-chip>
 								<v-chip
@@ -235,7 +318,10 @@
 		<v-dialog v-model="confirmVersionOpen" @esc="confirmVersionOpen = false">
 			<v-card>
 				<v-card-title>
-					<template v-if="pendingVersion?.is_current">
+					<template v-if="versionTarget?.source === 'local'">
+						Install Marketplace {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
+					</template>
+					<template v-else-if="pendingVersion?.is_current">
 						Reinstall {{ pendingVersion?.version }} of {{ versionTarget?.name }}?
 					</template>
 					<template v-else>
@@ -243,7 +329,11 @@
 					</template>
 				</v-card-title>
 				<v-card-text>
-					<p v-if="pendingVersion?.is_current">
+					<p v-if="versionTarget?.source === 'local'">
+						This replaces this local extension with Marketplace {{ pendingVersion?.version }} from
+						the registry. Future updates will use Marketplace.
+					</p>
+					<p v-else-if="pendingVersion?.is_current">
 						This restores the missing files for {{ pendingVersion?.version }}. Your project settings are
 						kept. You’ll be asked to refresh the page when it’s done.
 					</p>
@@ -259,7 +349,8 @@
 				<v-card-actions>
 					<v-button secondary @click="confirmVersionOpen = false">Cancel</v-button>
 					<v-button :loading="Boolean(applyingId)" @click="runInstallVersion">
-						<template v-if="pendingVersion?.is_current">Reinstall</template>
+						<template v-if="versionTarget?.source === 'local'">Install</template>
+						<template v-else-if="pendingVersion?.is_current">Reinstall</template>
 						<template v-else>Install</template>
 					</v-button>
 				</v-card-actions>
@@ -299,8 +390,9 @@
 					<template v-else>
 						<p>
 							Each extension will be updated to its latest Marketplace version, one at a time. This can
-							take a moment. Your project settings are kept. You’ll be asked to refresh the page when
-							it’s done.
+							take a moment. Marketplace installs keep project settings. Local extensions that match a
+							listing are switched to the Marketplace. You’ll be asked to refresh the page when it’s
+							done.
 						</p>
 						<p v-if="updateTargets.some((item) => item.is_self)" class="dialog-note">
 							This checker is included and will be applied last.
@@ -317,8 +409,65 @@
 						<template v-else>Cancel</template>
 					</v-button>
 					<v-button :loading="updatingAll" :disabled="updatingAll" @click="runUpdateAll">
-						Update all
+						Update All
 					</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
+		<v-dialog v-model="uploadOpen" @esc="!uploading && closeUploadDialog()">
+			<v-card>
+				<v-card-title>Upload from Device</v-card-title>
+				<v-card-text>
+					<p class="version-intro">
+						A <code>.zip</code>, <code>.tgz</code>, or <code>.tar.gz</code> with
+						<code>package.json</code> and the built files (usually a <code>dist/</code> folder).
+					</p>
+					<div
+						class="dropzone"
+						:class="{ dragging: uploadDragging, disabled: uploading }"
+						@dragenter.prevent="onUploadDragEnter"
+						@dragover.prevent
+						@dragleave.prevent="onUploadDragLeave"
+						@drop.prevent="onUploadDrop"
+					>
+						<input
+							ref="fileInput"
+							class="dropzone-browse"
+							type="file"
+							accept=".zip,.tgz,.tar.gz,application/zip,application/gzip"
+							:disabled="uploading"
+							@change="onFileChosen"
+						/>
+						<v-icon name="file_upload" large />
+						<p>{{ uploadDragging ? 'Drop to upload' : 'Drag file here' }}</p>
+					</div>
+				</v-card-text>
+				<v-card-actions>
+					<v-button secondary :disabled="uploading" @click="closeUploadDialog">Cancel</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
+		<v-dialog v-model="replaceOpen" @esc="replaceOpen = false">
+			<v-card>
+				<v-card-title>Replace {{ pendingReplace?.name }}?</v-card-title>
+				<v-card-text>
+					<p>
+						{{ pendingReplace?.name }} is already installed locally
+						<template v-if="pendingReplace?.current_version">
+							as {{ pendingReplace.current_version }}
+						</template>
+						. Replace it with
+						<template v-if="pendingReplace?.incoming_version">
+							{{ pendingReplace.incoming_version }}
+						</template>
+						<template v-else>this upload</template>?
+					</p>
+				</v-card-text>
+				<v-card-actions>
+					<v-button secondary @click="cancelReplace">Cancel</v-button>
+					<v-button :loading="uploading" @click="runReplaceUpload">Replace</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
@@ -376,6 +525,7 @@ import type {
 	ExtensionUpdateItem,
 	ExtensionVersionListResponse,
 	ExtensionVersionOption,
+	UpdateApplyResponse,
 	UpdateCheckResponse,
 } from '../shared/types';
 
@@ -389,6 +539,7 @@ const serverStore = useServerStore();
 const checking = ref(false);
 const applyingId = ref<string | null>(null);
 const updatingAll = ref(false);
+const uploading = ref(false);
 const cancelAllRequested = ref(false);
 const loadingVersions = ref(false);
 const errorMessage = ref<string | null>(null);
@@ -399,33 +550,56 @@ const confirmOpen = ref(false);
 const confirmAllOpen = ref(false);
 const confirmVersionOpen = ref(false);
 const versionPickerOpen = ref(false);
+const replaceOpen = ref(false);
 const reloadOpen = ref(false);
 const pending = ref<ExtensionUpdateItem | null>(null);
+const pendingReplace = ref<{
+	file: File;
+	name?: string;
+	current_version?: string;
+	incoming_version?: string;
+} | null>(null);
 const versionTarget = ref<ExtensionUpdateItem | null>(null);
 const versionList = ref<ExtensionVersionListResponse | null>(null);
 const pendingVersion = ref<ExtensionVersionOption | null>(null);
 const appliedVersion = ref('');
 const bulkResult = ref<{ succeeded: number; failed: number; skipped: number } | null>(null);
 const bulkProgress = ref<{ current: number; total: number; name: string } | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const showLocalUpdates = ref(false);
+const uploadOpen = ref(false);
+const uploadDragging = ref(false);
+let uploadDragCount = 0;
+
+const marketplaceItems = computed(() => items.value.filter((item) => item.source === 'registry'));
+const localItems = computed(() => items.value.filter((item) => item.source === 'local'));
+const visibleItems = computed(() =>
+	showLocalUpdates.value ? [...localItems.value, ...marketplaceItems.value] : marketplaceItems.value,
+);
+const visibleUpdateCount = computed(() => visibleItems.value.filter((item) => item.has_update).length);
+const visibleHostMismatchCount = computed(
+	() => visibleItems.value.filter((item) => item.has_update && item.host_mismatch).length,
+);
+const visibleCorruptItems = computed(() =>
+	visibleItems.value.filter((item) => item.installed_blocked_reason && !item.files_missing),
+);
+const visibleCorruptCount = computed(() => visibleCorruptItems.value.length);
 
 const summaryType = computed(() => {
 	if (!summary.value) return 'info';
-	if (summary.value.corrupt_count) return 'warning';
-	if (summary.value.update_count) return 'warning';
+	if (visibleCorruptCount.value) return 'warning';
+	if (visibleUpdateCount.value) return 'warning';
 	return 'success';
 });
 
 const updateTargets = computed(() => {
-	const pendingItems = items.value.filter((item) => item.has_update && !item.error);
+	const pendingItems = visibleItems.value.filter((item) => item.has_update && !item.error);
 	const others = pendingItems.filter((item) => !item.is_self);
 	const self = pendingItems.filter((item) => item.is_self);
 	return [...others, ...self];
 });
 
-const corruptNames = computed(() => {
-	if (summary.value?.corrupt_names?.length) return summary.value.corrupt_names;
-	return items.value.filter((item) => item.installed_blocked_reason).map((item) => item.name);
-});
+const corruptNames = computed(() => visibleCorruptItems.value.map((item) => item.name));
 
 function formatType(type: string) {
 	return type.charAt(0).toUpperCase() + type.slice(1);
@@ -460,6 +634,7 @@ async function waitUntilApplied(
 	targetVersionId: string,
 	expectedVersion: string,
 	timeoutMs = SETTLE_TIMEOUT_MS,
+	folder?: string,
 ): Promise<string> {
 	const started = Date.now();
 	let lastError: unknown;
@@ -483,7 +658,23 @@ async function waitUntilApplied(
 			}
 		} catch (error) {
 			lastError = error;
-			if (!isRouteNotFound(error) && !isNotFound(error) && !isTransportError(error)) {
+			if (folder && (isRouteNotFound(error) || isNotFound(error))) {
+				try {
+					const folderRes = await api.get(`/extension-updates/folder-status/${encodeURIComponent(folder)}`, {
+						timeout: 8_000,
+					});
+					const folderRow = folderRes.data?.data as {
+						current_version?: string;
+						files_ok?: boolean;
+					} | undefined;
+					if (folderRow?.files_ok && expectedVersion && folderRow.current_version === expectedVersion) {
+						await api.get('/extension-updates/ping', { timeout: 8_000 });
+						return expectedVersion;
+					}
+				} catch {
+					// keep polling
+				}
+			} else if (!isRouteNotFound(error) && !isNotFound(error) && !isTransportError(error)) {
 				throw error;
 			}
 		}
@@ -579,8 +770,11 @@ function confirmInstallVersion(version: ExtensionVersionOption) {
 	confirmVersionOpen.value = true;
 }
 
-async function applyOne(item: ExtensionUpdateItem, versionId?: string, expectedVersion?: string) {
-	const targetVersionId = versionId || item.latest_version_id || '';
+async function applyOne(
+	item: ExtensionUpdateItem,
+	versionId?: string,
+	expectedVersion?: string,
+) {
 	const expected = expectedVersion || item.latest_version || '';
 	let lastError: unknown;
 
@@ -596,28 +790,170 @@ async function applyOne(item: ExtensionUpdateItem, versionId?: string, expectedV
 				},
 				{ timeout: APPLY_POST_TIMEOUT_MS },
 			);
-			const toVersion = res.data?.data?.to_version || expected;
-			return await waitUntilApplied(item.id, targetVersionId, toVersion);
+			const data = (res.data?.data || {}) as UpdateApplyResponse;
+			const toVersion = data.to_version || expected;
+			const pollId = data.id || item.id;
+			const folder = data.folder || item.folder;
+			const targetVersionId =
+				data.kind === 'upload' ? '' : data.current_version_id || versionId || item.latest_version_id || '';
+			return await waitUntilApplied(pollId, targetVersionId, toVersion, SETTLE_TIMEOUT_MS, folder);
 		} catch (error) {
 			lastError = error;
 			if (isConflict(error)) {
-				return await waitUntilApplied(item.id, targetVersionId, expected);
+				return await waitUntilApplied(
+					item.id,
+					versionId || item.latest_version_id || '',
+					expected,
+					SETTLE_TIMEOUT_MS,
+					item.folder,
+				);
 			}
 			if (isRouteNotFound(error)) {
 				try {
-					return await waitUntilApplied(item.id, targetVersionId, expected, 20_000);
+					return await waitUntilApplied(
+						item.id,
+						versionId || item.latest_version_id || '',
+						expected,
+						20_000,
+						item.folder,
+					);
 				} catch {
 					continue;
 				}
 			}
 			if (isTransportError(error)) {
-				return await waitUntilApplied(item.id, targetVersionId, expected);
+				return await waitUntilApplied(
+					item.id,
+					versionId || item.latest_version_id || '',
+					expected,
+					SETTLE_TIMEOUT_MS,
+					item.folder,
+				);
 			}
 			throw error;
 		}
 	}
 
 	throw lastError || new Error('Update failed');
+}
+
+function pickUpload() {
+	uploadDragging.value = false;
+	uploadDragCount = 0;
+	uploadOpen.value = true;
+}
+
+function closeUploadDialog() {
+	if (uploading.value) return;
+	uploadOpen.value = false;
+	uploadDragging.value = false;
+	uploadDragCount = 0;
+}
+
+function isExtensionArchive(file: File) {
+	const name = file.name.toLowerCase();
+	return name.endsWith('.zip') || name.endsWith('.tgz') || name.endsWith('.tar.gz');
+}
+
+function onUploadDragEnter() {
+	uploadDragCount += 1;
+	if (uploadDragCount === 1) uploadDragging.value = true;
+}
+
+function onUploadDragLeave() {
+	uploadDragCount -= 1;
+	if (uploadDragCount <= 0) {
+		uploadDragCount = 0;
+		uploadDragging.value = false;
+	}
+}
+
+function onUploadDrop(event: DragEvent) {
+	uploadDragCount = 0;
+	uploadDragging.value = false;
+	const file = event.dataTransfer?.files?.[0];
+	if (!file || uploading.value) return;
+	void takeUploadFile(file);
+}
+
+function takeUploadFile(file: File) {
+	if (!isExtensionArchive(file)) {
+		errorMessage.value = 'Upload a .zip, .tgz, or .tar.gz package';
+		return;
+	}
+	uploadOpen.value = false;
+	void uploadFile(file, false);
+}
+
+function conflictDetails(error: unknown): {
+	name?: string;
+	current_version?: string;
+	incoming_version?: string;
+} | null {
+	const err = error as { response?: { status?: number; data?: { errors?: { extensions?: Record<string, string> }[] } } };
+	if (err?.response?.status !== 409) return null;
+	return err.response.data?.errors?.[0]?.extensions || null;
+}
+
+async function uploadFile(file: File, replace = false) {
+	uploading.value = true;
+	errorMessage.value = null;
+	bulkResult.value = null;
+	try {
+		const form = new FormData();
+		form.append('file', file);
+		const res = await api.post(`/extension-updates/upload${replace ? '?replace=1' : ''}`, form, {
+			timeout: APPLY_POST_TIMEOUT_MS,
+		});
+		const data = (res.data?.data || {}) as UpdateApplyResponse;
+		appliedVersion.value = await waitUntilApplied(
+			data.id,
+			'',
+			data.to_version,
+			SETTLE_TIMEOUT_MS,
+			data.folder,
+		);
+		pending.value = { name: data.name } as ExtensionUpdateItem;
+		reloadOpen.value = true;
+		await load(true, RELOAD_ROUTE_TIMEOUT_MS);
+	} catch (error: unknown) {
+		const conflict = conflictDetails(error);
+		if (conflict && !replace) {
+			pendingReplace.value = {
+				file,
+				name: conflict.name,
+				current_version: conflict.current_version,
+				incoming_version: conflict.incoming_version,
+			};
+			replaceOpen.value = true;
+			return;
+		}
+		errorMessage.value = apiErrorMessage(error, 'Upload failed');
+	} finally {
+		uploading.value = false;
+		if (fileInput.value) fileInput.value.value = '';
+	}
+}
+
+function onFileChosen(event: Event) {
+	const input = event.target as HTMLInputElement;
+	const file = input.files?.[0];
+	if (fileInput.value) fileInput.value.value = '';
+	if (!file) return;
+	void takeUploadFile(file);
+}
+
+function cancelReplace() {
+	replaceOpen.value = false;
+	pendingReplace.value = null;
+}
+
+async function runReplaceUpload() {
+	const pendingFile = pendingReplace.value?.file;
+	replaceOpen.value = false;
+	if (!pendingFile) return;
+	await uploadFile(pendingFile, true);
+	pendingReplace.value = null;
 }
 
 async function runReinstall(item: ExtensionUpdateItem) {
@@ -783,6 +1119,73 @@ onMounted(() => {
 	margin-bottom: 16px;
 }
 
+.actions-right {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.local-toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: -4px 0 16px;
+	font-size: 14px;
+	line-height: 1.4;
+	color: var(--theme--foreground);
+}
+
+.section-label {
+	margin: 8px 0 12px;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	color: var(--theme--foreground-subdued);
+}
+
+.dropzone {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-block-size: 140px;
+	padding: 24px 16px;
+	color: var(--theme--foreground-subdued);
+	text-align: center;
+	border: var(--theme--border-width, 2px) dashed var(--theme--form--field--input--border-color, var(--theme--border-color));
+	border-radius: var(--theme--border-radius, 6px);
+	cursor: pointer;
+}
+
+.dropzone p {
+	margin: 0;
+	color: inherit;
+}
+
+.dropzone.dragging {
+	color: var(--theme--primary);
+	background-color: var(--theme--primary-background);
+	border-color: var(--theme--primary);
+}
+
+.dropzone.disabled {
+	pointer-events: none;
+	opacity: 0.6;
+}
+
+.dropzone-browse {
+	position: absolute;
+	inset: 0;
+	inline-size: 100%;
+	block-size: 100%;
+	cursor: pointer;
+	opacity: 0;
+}
+
 .result {
 	margin-bottom: 16px;
 }
@@ -851,6 +1254,11 @@ onMounted(() => {
 	gap: 8px;
 	flex-shrink: 0;
 	justify-content: flex-end;
+}
+
+.marketplace-icon {
+	--v-button-min-width: 36px;
+	border-radius: var(--theme--border-radius, 6px) !important;
 }
 
 @media (max-width: 600px) {

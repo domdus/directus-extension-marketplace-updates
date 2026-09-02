@@ -112,3 +112,49 @@ export async function describeExtension(
 	describeCache.set(cacheKey, { data: described, expiresAt: Date.now() + TTL_MS });
 	return described;
 }
+
+const nameCache = new Map<string, { expiresAt: number; id: string | null }>();
+
+/** Exact package.json name match only. Zero or several hits → null. */
+export async function findMarketplaceByPackageName(
+	packageName: string,
+	registry: string,
+	force = false,
+): Promise<{ id: string; name: string } | null> {
+	const name = String(packageName || '').trim();
+	if (!name) return null;
+
+	const cacheKey = `${registry}:${name}`;
+	if (!force) {
+		const cached = nameCache.get(cacheKey);
+		if (cached && Date.now() < cached.expiresAt) {
+			if (!cached.id) return null;
+			return { id: cached.id, name };
+		}
+	}
+
+	const url = `${registry.replace(/\/+$/, '')}/extensions?search=${encodeURIComponent(name)}&limit=25`;
+	let response: Response;
+	try {
+		response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+	} catch {
+		nameCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60 * 1000, id: null });
+		return null;
+	}
+
+	if (!response.ok) {
+		nameCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60 * 1000, id: null });
+		return null;
+	}
+
+	const payload = (await response.json()) as { data?: { id?: string; name?: string }[] };
+	const exact = (payload.data || []).filter((row) => String(row.name || '') === name && row.id);
+	if (exact.length !== 1) {
+		nameCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, id: null });
+		return null;
+	}
+
+	const id = String(exact[0]!.id);
+	nameCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, id });
+	return { id, name };
+}

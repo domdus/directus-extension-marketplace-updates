@@ -1,77 +1,16 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
-
-type ExtensionManifest = {
-	'directus:extension'?: {
-		type?: string;
-		path?: string | { app?: string; api?: string };
-	};
-};
+import {
+	entryPathsFromManifest,
+	findPackFile,
+	readTarGz,
+	type ExtensionManifest,
+} from './archive';
+import { inspectPackageDir, localPackageDir, registryPackageDir } from './fs-local';
 
 const integrityCache = new Map<string, { expiresAt: number; ok: true } | { expiresAt: number; ok: false; message: string }>();
 const TTL_MS = 30 * 60 * 1000;
 
-function stripNul(value: string): string {
-	return value.replace(/\0.*$/s, '').trim();
-}
-
-/** List and read members from a gzipped ustar/npm pack tarball. */
-function readTarGz(buffer: Buffer): Map<string, Buffer> {
-	const data = gunzipSync(buffer);
-	const files = new Map<string, Buffer>();
-	let offset = 0;
-
-	while (offset + 512 <= data.length) {
-		const header = data.subarray(offset, offset + 512);
-		if (header.every((byte) => byte === 0)) break;
-
-		const name = stripNul(header.subarray(0, 100).toString('utf8'));
-		const prefix = stripNul(header.subarray(345, 500).toString('utf8'));
-		const size = Number.parseInt(stripNul(header.subarray(124, 136).toString('utf8')), 8) || 0;
-		const typeFlag = String.fromCharCode(header[156] || 0);
-		const fullName = prefix ? `${prefix}/${name}` : name;
-		offset += 512;
-
-		const content = data.subarray(offset, offset + size);
-		offset += Math.ceil(size / 512) * 512;
-
-		if (!fullName || typeFlag === '5') continue; // skip directories
-		files.set(fullName.replace(/^\.\//, ''), Buffer.from(content));
-	}
-
-	return files;
-}
-
-function normalizePackPath(filePath: string): string {
-	return filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
-}
-
-function entryPathsFromManifest(manifest: ExtensionManifest): string[] {
-	const ext = manifest['directus:extension'];
-	if (!ext?.path) return [];
-
-	if (typeof ext.path === 'string') {
-		return [normalizePackPath(ext.path)];
-	}
-
-	const paths: string[] = [];
-	if (ext.path.app) paths.push(normalizePackPath(ext.path.app));
-	if (ext.path.api) paths.push(normalizePackPath(ext.path.api));
-	return paths;
-}
-
-function findPackFile(files: Map<string, Buffer>, relativePath: string): Buffer | null {
-	const wanted = normalizePackPath(relativePath);
-	const candidates = [`package/${wanted}`, wanted];
-	for (const key of files.keys()) {
-		const normalized = normalizePackPath(key);
-		if (candidates.includes(normalized) || normalized.endsWith(`/${wanted}`)) {
-			return files.get(key) || null;
-		}
-	}
-	return null;
-}
+export { resolveExtensionsPath } from './fs-local';
 
 export async function assertMarketplacePackageIntegrity(
 	registry: string,
@@ -146,34 +85,19 @@ export async function assertMarketplacePackageIntegrity(
 	integrityCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, ok: true });
 }
 
-export function resolveExtensionsPath(env: Record<string, unknown> | undefined): string {
-	const raw = env?.EXTENSIONS_PATH;
-	if (typeof raw === 'string' && raw.trim()) {
-		return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
-	}
-	return path.resolve(process.cwd(), 'extensions');
-}
-
 export function inspectInstalledPackage(
 	env: Record<string, unknown> | undefined,
 	versionId: string,
 ): { name: string | null; missing: string[]; error?: string } {
-	const root = path.join(resolveExtensionsPath(env), '.registry', versionId);
-	const packageJsonPath = path.join(root, 'package.json');
-	if (!fs.existsSync(packageJsonPath)) {
-		return { name: null, missing: ['package.json'], error: 'missing package.json' };
-	}
+	const inspected = inspectPackageDir(registryPackageDir(env, versionId));
+	return { name: inspected.name, missing: inspected.missing, error: inspected.error };
+}
 
-	let manifest: ExtensionManifest & { name?: string };
-	try {
-		manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as ExtensionManifest & { name?: string };
-	} catch {
-		return { name: null, missing: ['package.json'], error: 'invalid package.json' };
-	}
-
-	const entries = entryPathsFromManifest(manifest);
-	const missing = entries.filter((entry) => !fs.existsSync(path.join(root, entry)));
-	return { name: manifest.name ? String(manifest.name) : null, missing };
+export function inspectLocalPackage(
+	env: Record<string, unknown> | undefined,
+	folder: string,
+): { name: string | null; version: string | null; type: string | null; host: string | null; missing: string[]; error?: string } {
+	return inspectPackageDir(localPackageDir(env, folder));
 }
 
 /** After Directus install — confirm entry files landed under .registry/<versionId>. */
@@ -198,6 +122,22 @@ export function assertInstalledPackageOnDisk(
 			new Error(
 				`Installed Marketplace package is corrupt/incomplete under .registry/${versionId} — missing ${inspected.missing.join(', ')}`,
 			),
+			{ status: 500 },
+		);
+	}
+}
+
+export function assertLocalPackageOnDisk(env: Record<string, unknown> | undefined, folder: string): void {
+	const inspected = inspectLocalPackage(env, folder);
+	if (inspected.error === 'missing package.json') {
+		throw Object.assign(new Error(`Installed local package is missing package.json under ${folder}`), { status: 500 });
+	}
+	if (inspected.error === 'invalid package.json') {
+		throw Object.assign(new Error(`Installed local package.json is invalid (${folder})`), { status: 500 });
+	}
+	if (inspected.missing.length) {
+		throw Object.assign(
+			new Error(`Installed local package is corrupt/incomplete under ${folder} — missing ${inspected.missing.join(', ')}`),
 			{ status: 500 },
 		);
 	}

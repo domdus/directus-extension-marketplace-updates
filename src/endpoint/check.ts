@@ -4,6 +4,9 @@ import { compareSemver, normalizeVersion, versionSatisfies } from '../shared/sem
 import type { ExtensionUpdateItem, UpdateCheckResponse } from '../shared/types';
 import { assertMarketplacePackageIntegrity, inspectInstalledPackage } from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
+import { readUpdateCache, writeUpdateCache } from './cache';
+import { mapLocalUpdates } from './local';
+import { mapPool } from './pool';
 
 type ExtensionsServiceLike = {
 	readOne: (id: string) => Promise<ApiOutput>;
@@ -57,9 +60,6 @@ async function listRegistryRoots(
 	return output;
 }
 
-const listCache = new Map<string, { expiresAt: number; data: UpdateCheckResponse }>();
-const LIST_TTL_MS = 30 * 60 * 1000;
-
 function schemaName(entry: ApiOutput): string {
 	const schema = entry.schema as { name?: string } | null;
 	return schema?.name ? String(schema.name) : entry.id;
@@ -85,28 +85,15 @@ function sortItems(items: ExtensionUpdateItem[]): ExtensionUpdateItem[] {
 		if (item.has_update && item.is_self) return 1;
 		if (item.has_update) return 0;
 		if (item.installed_blocked_reason) return 2;
-		if (item.error) return 3;
-		return 4;
+		if (item.source === 'local' && !item.marketplace_id) return 3;
+		if (item.error) return 4;
+		return 5;
 	};
 	return [...items].sort((a, b) => {
 		const diff = rank(a) - rank(b);
 		if (diff !== 0) return diff;
 		return a.name.localeCompare(b.name);
 	});
-}
-
-async function mapPool<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	async function worker() {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await mapper(items[index]!);
-		}
-	}
-	const workers = Array.from({ length: Math.min(limit, Math.max(items.length, 1)) }, () => worker());
-	await Promise.all(workers);
-	return results;
 }
 
 export async function checkMarketplaceUpdates(options: {
@@ -121,8 +108,8 @@ export async function checkMarketplaceUpdates(options: {
 	const cacheKey = `${registry}:${hostVersion || 'unknown'}`;
 
 	if (!options.force) {
-		const cached = listCache.get(cacheKey);
-		if (cached && Date.now() < cached.expiresAt) return cached.data;
+		const cached = readUpdateCache(cacheKey);
+		if (cached) return cached;
 	}
 
 	// Avoid ExtensionsService.readAll() — Directus 11.17 throws when a bundle
@@ -134,11 +121,13 @@ export async function checkMarketplaceUpdates(options: {
 		let currentVersion = schemaVersion(entry);
 		const base: ExtensionUpdateItem = {
 			id: entry.id,
+			source: 'registry',
 			name: schemaName(entry),
 			type: schemaType(entry),
 			enabled: Boolean(entry.meta?.enabled),
 			current_version: currentVersion,
 			current_version_id: currentVersionId,
+			folder: currentVersionId,
 			latest_version: null,
 			latest_version_id: null,
 			host_version: null,
@@ -204,22 +193,30 @@ export async function checkMarketplaceUpdates(options: {
 		return base;
 	});
 
-	const sorted = sortItems(items);
-	const corruptItems = sorted.filter((item) => item.installed_blocked_reason && !item.files_missing);
+	const localItems = await mapLocalUpdates({
+		extensionsService: options.extensionsService,
+		database: options.database,
+		env: options.env,
+		hostVersion,
+		force: options.force,
+	});
+
+	const marketplaceItems = sortItems(items);
+	const localSorted = sortItems(localItems);
+	const sorted = [...marketplaceItems, ...localSorted];
+	const marketplaceCorrupt = marketplaceItems.filter((item) => item.installed_blocked_reason && !item.files_missing);
 	const data: UpdateCheckResponse = {
 		host_version: hostVersion,
 		checked_at: new Date().toISOString(),
-		update_count: sorted.filter((item) => item.has_update).length,
-		host_mismatch_count: sorted.filter((item) => item.has_update && item.host_mismatch).length,
-		corrupt_count: corruptItems.length,
-		corrupt_names: corruptItems.map((item) => item.name),
+		update_count: marketplaceItems.filter((item) => item.has_update).length,
+		host_mismatch_count: marketplaceItems.filter((item) => item.has_update && item.host_mismatch).length,
+		corrupt_count: marketplaceCorrupt.length,
+		corrupt_names: marketplaceCorrupt.map((item) => item.name),
 		items: sorted,
 	};
 
-	listCache.set(cacheKey, { data, expiresAt: Date.now() + LIST_TTL_MS });
+	writeUpdateCache(cacheKey, data);
 	return data;
 }
 
-export function invalidateUpdateCache(): void {
-	listCache.clear();
-}
+export { invalidateUpdateCache } from './cache';

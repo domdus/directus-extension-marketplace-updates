@@ -299,7 +299,7 @@ function formatSummary(data: CheckPayload): string {
 	}
 	const count = Number(data.update_count || 0);
 	if (count) {
-		parts.push(count === 1 ? '1 Marketplace update available' : `${count} Marketplace updates available`);
+		parts.push(count === 1 ? '1 update available' : `${count} updates available`);
 	}
 	const mismatch = Number(data.host_mismatch_count || 0);
 	if (mismatch) {

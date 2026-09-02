@@ -14,13 +14,17 @@ export type RegistryDescribe = {
 	versions: RegistryVersion[];
 };
 
+export type ExtensionSource = 'registry' | 'local';
+
 export type ExtensionUpdateItem = {
 	id: string;
+	source: ExtensionSource;
 	name: string;
 	type: string | null;
 	enabled: boolean;
 	current_version: string;
 	current_version_id: string;
+	folder: string;
 	latest_version: string | null;
 	latest_version_id: string | null;
 	host_version: string | null;
@@ -29,6 +33,9 @@ export type ExtensionUpdateItem = {
 	host_mismatch: boolean;
 	is_self: boolean;
 	marketplace_path: string;
+	marketplace_id?: string | null;
+	/** Local copy is newer than the latest Marketplace release. */
+	marketplace_older?: boolean;
 	/** Real failures (lookup/read). Not used when only the newest Marketplace release is corrupt. */
 	error?: string;
 	/**
@@ -48,6 +55,7 @@ export type ExtensionUpdateItem = {
 export type UpdateCheckResponse = {
 	host_version: string | null;
 	checked_at: string;
+	/** Marketplace (registry) updates only. Settings banners use this, not local switches. */
 	update_count: number;
 	host_mismatch_count: number;
 	corrupt_count: number;
@@ -64,6 +72,9 @@ export type UpdateApplyResponse = {
 	self_update: boolean;
 	/** `started` = HTTP returned before native uninstall/install finished. */
 	status?: 'started' | 'complete';
+	kind?: 'registry' | 'swap' | 'upload' | 'uninstall';
+	folder?: string;
+	current_version_id?: string;
 };
 
 export type ExtensionVersionOption = {
@@ -79,7 +90,15 @@ export type ExtensionVersionOption = {
 export type ExtensionVersionListResponse = {
 	id: string;
 	name: string;
+	source: ExtensionSource;
 	current_version: string;
 	current_version_id: string;
 	versions: ExtensionVersionOption[];
+};
+
+export type FolderStatus = {
+	folder: string;
+	name: string | null;
+	current_version: string;
+	files_ok: boolean;
 };

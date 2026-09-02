@@ -2,11 +2,12 @@ import type { ApiOutput } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
 import { compareSemver, normalizeVersion } from '../shared/semver';
 import type { UpdateApplyResponse } from '../shared/types';
-import { invalidateUpdateCache } from './check';
+import { invalidateUpdateCache } from './cache';
 import {
 	assertInstalledPackageOnDisk,
 	assertMarketplacePackageIntegrity,
 	inspectInstalledPackage,
+	inspectLocalPackage,
 	invalidateIntegrityCache,
 } from './package-integrity';
 import { describeExtension, readHostVersion, resolveRegistryBase } from './registry';
@@ -34,6 +35,17 @@ export type ApplyPlan = {
 
 let applying = false;
 
+export function beginApply(): void {
+	if (applying) {
+		throw Object.assign(new Error('An update is already in progress'), { status: 409 });
+	}
+	applying = true;
+}
+
+export function endApply(): void {
+	applying = false;
+}
+
 function schemaName(entry: ApiOutput): string {
 	const schema = entry.schema as { name?: string } | null;
 	return schema?.name ? String(schema.name) : entry.id;
@@ -59,8 +71,11 @@ export function readInstallStatus(
 	files_ok: boolean;
 } {
 	const current_version_id = String(entry.meta?.folder || '');
+	const source = entry.meta?.source;
 	const inspected = current_version_id
-		? inspectInstalledPackage(env, current_version_id)
+		? source === 'local'
+			? inspectLocalPackage(env, current_version_id)
+			: inspectInstalledPackage(env, current_version_id)
 		: { missing: ['package.json'], error: 'missing package.json' as const };
 	const files_ok = !inspected.error && inspected.missing.length === 0;
 	return {
@@ -83,11 +98,7 @@ export async function prepareMarketplaceUpdate(options: {
 	versionId?: string | null;
 	hostVersion?: string | null;
 }): Promise<ApplyPlan> {
-	if (applying) {
-		throw Object.assign(new Error('An update is already in progress'), { status: 409 });
-	}
-
-	applying = true;
+	beginApply();
 	try {
 		const current = await options.extensionsService.readOne(options.extensionId);
 		if (current.meta?.source !== 'registry') {
@@ -151,11 +162,13 @@ export async function prepareMarketplaceUpdate(options: {
 				to_version: target.version,
 				reload_required: true,
 				self_update: selfUpdate,
+				kind: 'registry',
+				current_version_id: target.id,
 				status: 'started',
 			},
 		};
 	} catch (error) {
-		applying = false;
+		endApply();
 		throw error;
 	}
 }
@@ -206,7 +219,7 @@ export async function finalizeMarketplaceUpdate(plan: ApplyPlan, logger?: Logger
 		logger?.error(`[extension-updates] Apply failed for ${plan.extensionId}: ${message}`);
 		throw error;
 	} finally {
-		applying = false;
+		endApply();
 		invalidateUpdateCache();
 		invalidateIntegrityCache();
 	}
