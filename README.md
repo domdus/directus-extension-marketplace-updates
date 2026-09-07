@@ -13,7 +13,7 @@ Open **Settings → Extension Updates** (admins only). A notice also appears on 
 - Lists Marketplace-installed extensions and compares each with the latest Marketplace release
 - Updates one extension at a time, or **Update All** for what is currently listed (this checker is applied last)
 - **Choose Version** — install any published Marketplace release (upgrade or rollback). Releases that are missing their built files are blocked so they cannot break Studio
-- **Show Local Extension Updates** — optional list of local copies. Local entries appear first. If a copy matches a Marketplace listing, **Update** or **Choose Version** switches it to a Marketplace install. If there is no listing, it is marked **Not on Marketplace** and can only be replaced by upload
+- **Show Local Extension Updates** — optional list of local copies that have a Marketplace update path (newer release, corrupt install, or lookup error). Local entries appear first. **Update** or **Choose Version** switches them to a Marketplace install. Custom extensions not on the Marketplace are omitted — use **Upload ZIP** for those
 - **Upload ZIP** — install or replace a local extension from a `.zip` or `.tgz`. Drag and drop, or browse. The archive must include `package.json` and the built files (usually a `dist/` folder). You cannot overwrite an extension that is already installed from the Marketplace this way
 - Packages with missing built files are blocked. Enabled Marketplace installs that are already incomplete on disk are disabled so other Studio extensions can still load — then use Choose Version to restore a complete release
 - Extensions installed via npm into `node_modules` are not managed here

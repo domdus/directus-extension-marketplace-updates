@@ -92,7 +92,10 @@
 				v-if="showLocalUpdates && !checking && localItems.length === 0 && !errorMessage"
 				class="result"
 			>
-				<v-notice type="info">No local extensions were found on this instance.</v-notice>
+				<v-notice type="info">
+					No local extensions with a Marketplace update are available. Custom extensions that are not on
+					the Marketplace can only be updated by upload.
+				</v-notice>
 			</div>
 
 			<div v-if="!checking && marketplaceItems.length === 0 && !errorMessage && !showLocalUpdates" class="result">
@@ -528,6 +531,7 @@ import type {
 	UpdateApplyResponse,
 	UpdateCheckResponse,
 } from '../shared/types';
+import { localHasUpdatePath } from '../shared/local-update-path';
 
 const pageClass = usePageClass();
 const api = useApi();
@@ -572,7 +576,16 @@ const uploadDragging = ref(false);
 let uploadDragCount = 0;
 
 const marketplaceItems = computed(() => items.value.filter((item) => item.source === 'registry'));
-const localItems = computed(() => items.value.filter((item) => item.source === 'local'));
+const localItems = computed(() => {
+	const seen = new Set<string>();
+	return items.value.filter((item) => {
+		if (!localHasUpdatePath(item)) return false;
+		const key = item.folder || item.id;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+});
 const visibleItems = computed(() =>
 	showLocalUpdates.value ? [...localItems.value, ...marketplaceItems.value] : marketplaceItems.value,
 );
