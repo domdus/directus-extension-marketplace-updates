@@ -348,9 +348,6 @@ function formatSummary(data: CheckPayload): string {
 				: `${mismatch} newer releases need a newer Directus`,
 		);
 	}
-	if (data.host_version) {
-		parts.push(`Directus ${data.host_version}`);
-	}
 	return parts.join(' · ');
 }
 

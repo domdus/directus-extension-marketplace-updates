@@ -82,9 +82,6 @@
 						>
 						need a newer Directus
 					</template>
-					<template v-if="summary.host_version">
-						· Directus {{ summary.host_version }}
-					</template>
 				</v-notice>
 			</div>
 

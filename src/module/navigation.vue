@@ -78,6 +78,12 @@ const versionLabel = computed(() => {
 	return version ? `Directus ${version}` : 'Directus';
 });
 
+function isDirectus12OrNewer(version: string | undefined): boolean {
+	if (!version) return false;
+	const major = Number.parseInt(version.trim().replace(/^v/i, '').split('.')[0] || '', 10);
+	return Number.isFinite(major) && major >= 12;
+}
+
 const linkGroups = computed(() => {
 	const groups: NavLink[][] = [
 		[
@@ -90,6 +96,9 @@ const linkGroups = computed(() => {
 		],
 		[
 			{ icon: 'tune', name: t('settings_project'), to: '/settings/project' },
+			...(isDirectus12OrNewer(info.value?.version)
+				? [{ icon: 'diamond', name: t('settings_license'), to: '/settings/license' }]
+				: []),
 			{ icon: 'palette', name: t('settings_appearance'), to: '/settings/appearance' },
 			{ icon: 'bookmark', name: t('settings_presets'), to: '/settings/presets' },
 			{ icon: 'translate', name: t('settings_translations'), to: '/settings/translations' },
