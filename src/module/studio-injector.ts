@@ -144,8 +144,8 @@ function setLinkActive(node: HTMLElement, active: boolean): void {
 	node.classList.toggle('active', active);
 }
 
-function removeInjectedNav(): void {
-	document.querySelectorAll(`[${NAV_ATTR}]`).forEach((node) => node.remove());
+function detachInjectedNav(): void {
+	if (cachedUpdatesNav?.isConnected) cachedUpdatesNav.remove();
 }
 
 function listAlreadyHasUpdatesLink(list: Element | null): boolean {
@@ -188,33 +188,15 @@ function wireSpaNavigation(root: HTMLElement): void {
 		return;
 	}
 	for (const target of targets) {
+		target.removeEventListener('click', navigateToUpdates);
 		target.addEventListener('click', navigateToUpdates);
 	}
 }
 
-function injectSettingsNav(): void {
-	// This page already renders Marketplace / Extensions / Extension Updates in Vue.
-	// Only inject into native Settings navigation.
-	if (isUpdatesPage() || !isSettingsModule()) {
-		removeInjectedNav();
-		return;
-	}
+let cachedUpdatesNav: HTMLElement | null = null;
 
-	const extensionsLink = findExtensionsNavLink();
-	if (!extensionsLink) return;
-	const list = extensionsLink.closest('ul, .v-list, nav');
-	if (listAlreadyHasUpdatesLink(list)) {
-		removeInjectedNav();
-		return;
-	}
-
-	if (document.querySelector(`[${NAV_ATTR}]`)) {
-		const existing = document.querySelector(`[${NAV_ATTR}]`) as HTMLElement | null;
-		if (existing) setLinkActive(existing, false);
-		return;
-	}
-
-	const clone = extensionsLink.cloneNode(true) as HTMLElement;
+function buildUpdatesNavLink(template: HTMLElement): HTMLElement {
+	const clone = template.cloneNode(true) as HTMLElement;
 	clone.setAttribute(NAV_ATTR, '1');
 	const href = updatesPath();
 	if (clone.tagName === 'A') {
@@ -235,11 +217,68 @@ function injectSettingsNav(): void {
 	const iconText = clone.querySelector('.material-icons, .material-symbols-outlined, .material-symbols-rounded');
 	if (iconText) iconText.textContent = 'system_update';
 
-	setLinkActive(clone, false);
-	setLinkActive(extensionsLink, /\/settings\/extensions\/?$/.test(window.location.pathname));
-
 	wireSpaNavigation(clone);
-	extensionsLink.parentElement?.insertBefore(clone, extensionsLink.nextSibling);
+	return clone;
+}
+
+function updateNavActiveStates(updatesLink: HTMLElement, extensionsLink: HTMLElement): void {
+	setLinkActive(updatesLink, false);
+	setLinkActive(extensionsLink, /\/settings\/extensions\/?$/.test(window.location.pathname));
+}
+
+function navNeedsInjection(): boolean {
+	if (isUpdatesPage() || !isSettingsModule()) return false;
+	const extensionsLink = findExtensionsNavLink();
+	if (!extensionsLink) return false;
+	const list = extensionsLink.closest('ul, .v-list, nav');
+	if (listAlreadyHasUpdatesLink(list)) return false;
+	if (cachedUpdatesNav?.isConnected && cachedUpdatesNav.previousElementSibling === extensionsLink) {
+		return false;
+	}
+	return true;
+}
+
+function injectSettingsNav(): void {
+	// Extension Updates renders the full Settings nav in Vue; only inject on native Settings pages.
+	if (isUpdatesPage() || !isSettingsModule()) {
+		detachInjectedNav();
+		return;
+	}
+
+	const extensionsLink = findExtensionsNavLink();
+	if (!extensionsLink) return;
+	const list = extensionsLink.closest('ul, .v-list, nav');
+	if (listAlreadyHasUpdatesLink(list)) {
+		detachInjectedNav();
+		return;
+	}
+
+	if (cachedUpdatesNav?.isConnected && cachedUpdatesNav.previousElementSibling === extensionsLink) {
+		updateNavActiveStates(cachedUpdatesNav, extensionsLink);
+		return;
+	}
+
+	if (cachedUpdatesNav?.isConnected) {
+		cachedUpdatesNav.remove();
+	}
+
+	if (!cachedUpdatesNav) {
+		cachedUpdatesNav = buildUpdatesNavLink(extensionsLink);
+	}
+
+	extensionsLink.parentElement?.insertBefore(cachedUpdatesNav, extensionsLink.nextSibling);
+	updateNavActiveStates(cachedUpdatesNav, extensionsLink);
+}
+
+function syncNavImmediate(): void {
+	if (!isAdminUser()) return;
+	ensureStyles();
+	injectSettingsNav();
+}
+
+function scheduleNavRetry(): void {
+	queueMicrotask(syncNavImmediate);
+	requestAnimationFrame(syncNavImmediate);
 }
 
 function removeBanner(): void {
@@ -318,6 +357,7 @@ function formatSummary(data: CheckPayload): string {
 let bannerInflight = false;
 let bannerCheckedAt = 0;
 let bannerEmpty = false;
+let bannerTimer = 0;
 
 async function injectBanner(): Promise<void> {
 	if (!isBannerPage()) {
@@ -355,12 +395,26 @@ async function injectBanner(): Promise<void> {
 	}
 }
 
-function sync(): void {
-	if (!isAdminUser()) return;
-	ensureStyles();
-	injectSettingsNav();
-	void injectBanner();
-	if (!isBannerPage()) removeBanner();
+function syncBannerDebounced(): void {
+	window.clearTimeout(bannerTimer);
+	bannerTimer = window.setTimeout(() => {
+		void injectBanner();
+		if (!isBannerPage()) removeBanner();
+	}, 80);
+}
+
+function onDomChange(): void {
+	if (navNeedsInjection()) {
+		syncNavImmediate();
+		scheduleNavRetry();
+	}
+	syncBannerDebounced();
+}
+
+function onRouteChange(): void {
+	syncNavImmediate();
+	scheduleNavRetry();
+	syncBannerDebounced();
 }
 
 export function installStudioInjector(): void {
@@ -369,22 +423,16 @@ export function installStudioInjector(): void {
 	(window as any)[FLAG] = true;
 
 	const start = () => {
-		sync();
-		let timer = 0;
-		const observer = new MutationObserver(() => {
-			window.clearTimeout(timer);
-			timer = window.setTimeout(sync, 80);
-		});
+		onRouteChange();
+		const observer = new MutationObserver(onDomChange);
 		observer.observe(document.body, { childList: true, subtree: true });
 
 		const app = getVueApp();
 		const router = app?.config?.globalProperties?.$router;
 		if (router?.afterEach) {
-			router.afterEach(() => {
-				window.setTimeout(sync, 30);
-			});
+			router.afterEach(onRouteChange);
 		} else {
-			window.addEventListener('popstate', () => window.setTimeout(sync, 30));
+			window.addEventListener('popstate', onRouteChange);
 		}
 	};
 
