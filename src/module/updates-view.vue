@@ -494,8 +494,8 @@
 					</template>
 				</v-card-text>
 				<v-card-actions>
-					<v-button secondary @click="reloadOpen = false">Later</v-button>
-					<v-button @click="reloadNow">Reload now</v-button>
+					<v-button secondary :disabled="reloading" @click="reloadOpen = false">Later</v-button>
+					<v-button :loading="reloading" :disabled="reloading" @click="reloadNow">Reload now</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
@@ -553,6 +553,7 @@ const confirmVersionOpen = ref(false);
 const versionPickerOpen = ref(false);
 const replaceOpen = ref(false);
 const reloadOpen = ref(false);
+const reloading = ref(false);
 const pending = ref<ExtensionUpdateItem | null>(null);
 const pendingReplace = ref<{
 	file: File;
@@ -1087,6 +1088,8 @@ async function runUpdateAll() {
 }
 
 function reloadNow() {
+	if (reloading.value) return;
+	reloading.value = true;
 	window.location.reload();
 }
 
