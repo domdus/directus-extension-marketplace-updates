@@ -1,5 +1,6 @@
 import type { ApiOutput, ExtensionSettings } from '@directus/types';
 import { EXTENSION_MARKETPLACE_UID, EXTENSION_PACKAGE_NAME } from '../shared/extension-meta';
+import { markLocalCopies } from '../shared/local-copies';
 import { compareSemver, normalizeVersion, versionSatisfies } from '../shared/semver';
 import type { ExtensionUpdateItem, UpdateCheckResponse } from '../shared/types';
 import { assertMarketplacePackageIntegrity, inspectInstalledPackage } from './package-integrity';
@@ -201,7 +202,7 @@ export async function checkMarketplaceUpdates(options: {
 		force: options.force,
 	});
 
-	const marketplaceItems = sortItems(items);
+	const marketplaceItems = sortItems(markLocalCopies(items, localItems));
 	const localSorted = sortItems(localItems);
 	const sorted = [...marketplaceItems, ...localSorted];
 	const marketplaceCorrupt = marketplaceItems.filter((item) => item.installed_blocked_reason && !item.files_missing);

@@ -194,8 +194,12 @@ export async function finalizeMarketplaceUpdate(plan: ApplyPlan, logger?: Logger
 				}
 				try {
 					await plan.extensionsService.install(plan.extensionId, plan.previousVersionId);
-				} catch {
-					// original error is more useful
+				} catch (rollbackError) {
+					const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+					logger?.error(
+						`[extension-updates] Rollback failed for ${plan.extensionId}: it is now uninstalled. ` +
+							`Reinstall version ${plan.previousVersionId} from the Marketplace. Cause: ${message}`,
+					);
 				}
 			}
 			throw error;

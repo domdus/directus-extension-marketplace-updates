@@ -36,6 +36,10 @@ export type ExtensionUpdateItem = {
 	marketplace_id?: string | null;
 	/** Local copy is newer than the latest Marketplace release. */
 	marketplace_older?: boolean;
+	/** This Marketplace copy is disabled and an enabled local copy of this version runs instead. */
+	replaced_by_local_version?: string;
+	/** This Marketplace copy is enabled alongside a local copy of this version, so both run. */
+	duplicate_local_version?: string;
 	/** Real failures (lookup/read). Not used when only the newest Marketplace release is corrupt. */
 	error?: string;
 	/**
