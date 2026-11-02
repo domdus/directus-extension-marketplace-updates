@@ -5,6 +5,7 @@ export function localHasUpdatePath(item: ExtensionUpdateItem): boolean {
 	if (item.source !== 'local') return false;
 	if (!item.marketplace_id) return false;
 	if (item.has_update) return true;
+	if (item.version_locked) return true;
 	if (item.files_missing) return true;
 	if (item.installed_blocked_reason) return true;
 	if (item.latest_blocked_reason) return true;

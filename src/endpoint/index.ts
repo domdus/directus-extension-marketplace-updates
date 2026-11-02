@@ -2,13 +2,14 @@ import type { Request, Response, NextFunction, Router } from 'express';
 import type { ApiExtensionContext } from '@directus/types';
 import { accountabilityIsAdmin } from '../shared/admin';
 import { finalizeMarketplaceUpdate, prepareMarketplaceUpdate, readInstallStatus } from './apply';
-import { checkMarketplaceUpdates } from './check';
+import { checkMarketplaceUpdates, invalidateUpdateCache } from './check';
 import {
 	finalizeLocalPlan,
 	prepareMarketplaceSwap,
 	prepareUpload,
 	readFolderStatus,
 } from './local';
+import { writeVersionLock } from './locks';
 import { quarantineCorruptRegistryExtensions } from './quarantine';
 import { readUploadBuffer } from './upload-body';
 import { listExtensionVersions } from './versions';
@@ -245,6 +246,30 @@ export default {
 					sendError(res, error);
 					return;
 				}
+				next(error);
+			}
+		});
+
+		router.post('/lock', async (req: Request, res: Response, next: NextFunction) => {
+			try {
+				if (!requireAdmin(req, res)) return;
+				const body = (req.body || {}) as { extension?: unknown; version?: unknown };
+				const extensionId = typeof body.extension === 'string' ? body.extension : '';
+				const version = body.version === null ? null : typeof body.version === 'string' ? body.version : '';
+				if (!extensionId || extensionId.length > 255 || version === '' || (version?.length ?? 0) > 64) {
+					res.status(400).json({ errors: [{ message: 'extension and version are required' }] });
+					return;
+				}
+				await writeVersionLock({
+					services: services as any,
+					schema: await getSchema(),
+					database,
+					extensionId,
+					version,
+				});
+				invalidateUpdateCache();
+				res.json({ data: { extension: extensionId, version } });
+			} catch (error) {
 				next(error);
 			}
 		});
