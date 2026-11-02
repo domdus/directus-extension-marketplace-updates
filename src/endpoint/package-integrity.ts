@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {
 	entryPathsFromManifest,
 	findPackFile,
+	MAX_UPLOAD_BYTES,
 	readTarGz,
 	type ExtensionManifest,
 } from './archive';
@@ -11,6 +12,28 @@ const integrityCache = new Map<string, { expiresAt: number; ok: true } | { expir
 const TTL_MS = 30 * 60 * 1000;
 
 export { resolveExtensionsPath } from './fs-local';
+
+async function readResponseBounded(response: Response, maxBytes: number): Promise<Buffer> {
+	if (Number(response.headers.get('content-length')) > maxBytes) {
+		throw new Error(`package exceeds ${maxBytes} bytes`);
+	}
+	if (!response.body) return Buffer.alloc(0);
+
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	const reader = response.body.getReader();
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.length;
+		if (size > maxBytes) {
+			await reader.cancel();
+			throw new Error(`package exceeds ${maxBytes} bytes`);
+		}
+		chunks.push(value);
+	}
+	return Buffer.concat(chunks);
+}
 
 export async function assertMarketplacePackageIntegrity(
 	registry: string,
@@ -42,10 +65,9 @@ export async function assertMarketplacePackageIntegrity(
 		throw Object.assign(new Error(message), { status: 502 });
 	}
 
-	const buffer = Buffer.from(await response.arrayBuffer());
 	let files: Map<string, Buffer>;
 	try {
-		files = readTarGz(buffer);
+		files = await readTarGz(await readResponseBounded(response, MAX_UPLOAD_BYTES));
 	} catch (error: any) {
 		const message = `Marketplace package is not a readable tarball (${error?.message || 'parse error'})`;
 		integrityCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, ok: false, message });

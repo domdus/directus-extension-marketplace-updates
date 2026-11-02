@@ -1,8 +1,29 @@
-import { gunzipSync, inflateRawSync } from 'node:zlib';
+import { promisify } from 'node:util';
+import { gunzip, inflateRaw } from 'node:zlib';
+
+const gunzipAsync = promisify(gunzip);
+const inflateRawAsync = promisify(inflateRaw);
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 export const MAX_ARCHIVE_ENTRIES = 2_000;
+
+/** Tar adds at least a header per entry on top of the unpacked payload. */
+const MAX_TAR_BYTES = MAX_UNCOMPRESSED_BYTES + MAX_ARCHIVE_ENTRIES * 1024;
+
+function tooLargeError(): Error {
+	return Object.assign(new Error('Archive is too large once unpacked'), { status: 413 });
+}
+
+/** zlib stops at `maxOutputLength`, so a compression bomb fails before it fills memory. */
+async function inflateBounded(run: () => Promise<Buffer>): Promise<Buffer> {
+	try {
+		return await run();
+	} catch (error: any) {
+		if (error?.code === 'ERR_BUFFER_TOO_LARGE') throw tooLargeError();
+		throw error;
+	}
+}
 
 export type ExtensionManifest = {
 	name?: string;
@@ -40,8 +61,8 @@ function stripNul(value: string): string {
 }
 
 /** List and read members from a gzipped ustar/npm pack tarball. */
-export function readTarGz(buffer: Buffer): ArchiveFiles {
-	const data = gunzipSync(buffer);
+export async function readTarGz(buffer: Buffer): Promise<ArchiveFiles> {
+	const data = await inflateBounded(() => gunzipAsync(buffer, { maxOutputLength: MAX_TAR_BYTES }));
 	const files: ArchiveFiles = new Map();
 	let offset = 0;
 	let uncompressed = 0;
@@ -58,9 +79,7 @@ export function readTarGz(buffer: Buffer): ArchiveFiles {
 		offset += 512;
 
 		uncompressed += size;
-		if (uncompressed > MAX_UNCOMPRESSED_BYTES) {
-			throw new Error('Archive is too large once unpacked');
-		}
+		if (uncompressed > MAX_UNCOMPRESSED_BYTES) throw tooLargeError();
 		if (files.size >= MAX_ARCHIVE_ENTRIES) {
 			throw new Error('Archive has too many files');
 		}
@@ -94,7 +113,7 @@ function readU32(buffer: Buffer, offset: number): number {
 }
 
 /** Read a zip (store or deflate). ZIP64 and encrypted archives are rejected. */
-export function readZip(buffer: Buffer): ArchiveFiles {
+export async function readZip(buffer: Buffer): Promise<ArchiveFiles> {
 	const eocd = findEocdOffset(buffer);
 	const totalEntries = readU16(buffer, eocd + 10);
 	const cdSize = readU32(buffer, eocd + 12);
@@ -141,10 +160,7 @@ export function readZip(buffer: Buffer): ArchiveFiles {
 		const rel = normalizePackPath(name);
 		if (!rel || rel.endsWith('/')) continue;
 
-		uncompressedTotal += uncompressedSize;
-		if (uncompressedTotal > MAX_UNCOMPRESSED_BYTES) {
-			throw new Error('Archive is too large once unpacked');
-		}
+		if (uncompressedTotal + uncompressedSize > MAX_UNCOMPRESSED_BYTES) throw tooLargeError();
 
 		if (localOffset + 30 > buffer.length) {
 			throw new Error('Zip local header is truncated');
@@ -165,7 +181,8 @@ export function readZip(buffer: Buffer): ArchiveFiles {
 		if (method === 0) {
 			content = Buffer.from(compressed);
 		} else if (method === 8) {
-			content = inflateRawSync(compressed);
+			const remaining = MAX_UNCOMPRESSED_BYTES - uncompressedTotal;
+			content = await inflateBounded(() => inflateRawAsync(compressed, { maxOutputLength: Math.max(1, remaining) }));
 		} else {
 			throw new Error(`Unsupported zip compression method (${method})`);
 		}
@@ -173,6 +190,9 @@ export function readZip(buffer: Buffer): ArchiveFiles {
 		if (uncompressedSize && content.length !== uncompressedSize) {
 			throw new Error(`Zip entry ${rel} has an unexpected size`);
 		}
+		// The header's size is attacker-controlled; count what actually came out.
+		uncompressedTotal += content.length;
+		if (uncompressedTotal > MAX_UNCOMPRESSED_BYTES) throw tooLargeError();
 		files.set(rel, content);
 	}
 
@@ -188,7 +208,7 @@ export function detectArchiveKind(buffer: Buffer, filename = ''): 'zip' | 'tgz' 
 	throw new Error('Upload must be a .zip or npm .tgz package');
 }
 
-export function readArchive(buffer: Buffer, filename = ''): ArchiveFiles {
+export async function readArchive(buffer: Buffer, filename = ''): Promise<ArchiveFiles> {
 	const kind = detectArchiveKind(buffer, filename);
 	return kind === 'zip' ? readZip(buffer) : readTarGz(buffer);
 }
@@ -272,11 +292,14 @@ export function selectInstallFiles(files: ArchiveFiles, prefix: string, manifest
 	return out;
 }
 
-export function parseExtensionArchive(buffer: Buffer, filename = ''): {
+export async function parseExtensionArchive(
+	buffer: Buffer,
+	filename = '',
+): Promise<{
 	files: ArchiveFiles;
 	manifest: ExtensionManifest;
-} {
-	const archive = readArchive(buffer, filename);
+}> {
+	const archive = await readArchive(buffer, filename);
 	const { prefix, manifest } = locateExtensionRoot(archive);
 	return { files: selectInstallFiles(archive, prefix, manifest), manifest };
 }

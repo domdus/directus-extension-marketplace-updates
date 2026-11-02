@@ -122,11 +122,16 @@
 						<v-chip v-if="item.type" small class="type-chip">{{ formatType(item.type) }}</v-chip>
 						<v-chip v-if="item.files_missing" small class="state warning">Missing files</v-chip>
 						<v-chip v-else-if="item.installed_blocked_reason" small class="state warning">Corrupt install</v-chip>
+						<v-chip v-else-if="item.replaced_by_local_version" small class="type-chip">
+							Replaced by local {{ item.replaced_by_local_version }}
+						</v-chip>
 						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
 						<v-chip v-else-if="item.source === 'local' && !item.marketplace_id" small class="type-chip">Not on Marketplace</v-chip>
 						<v-chip v-else small class="state enabled">Up to date</v-chip>
+						<v-chip v-if="item.duplicate_local_version" small class="state warning">Running twice</v-chip>
+						<v-chip v-else-if="showDisabledChip(item)" small class="type-chip">Disabled</v-chip>
 					</div>
 					<p class="ext-meta">
 						Installed {{ item.current_version }}
@@ -150,6 +155,14 @@
 						<template v-else>Upload a complete package, then enable it again.</template>
 					</p>
 					<p v-else-if="item.error" class="ext-error">{{ item.error }}</p>
+					<p v-else-if="item.duplicate_local_version" class="ext-error">
+						Local {{ item.duplicate_local_version }} is also enabled, so Directus loads both copies. Disable
+						or uninstall one of them.
+					</p>
+					<p v-else-if="item.replaced_by_local_version" class="ext-note">
+						This Marketplace copy is disabled and local {{ item.replaced_by_local_version }} runs instead, so
+						it needs no update. Uninstall it in the Marketplace to remove this row.
+					</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
 						Latest {{ item.latest_version }} is corrupt on the Marketplace. Your installed version is fine —
 						use Choose Version for other releases.
@@ -157,6 +170,9 @@
 					<p v-else-if="item.source === 'local' && item.has_update" class="ext-note">
 						Marketplace {{ item.latest_version }} is newer. Update switches this local extension to a
 						registry install.
+					</p>
+					<p v-else-if="item.has_update && !item.enabled" class="ext-note">
+						This extension is disabled, and updating keeps it disabled.
 					</p>
 					<p v-else-if="item.has_update && item.host_mismatch && item.host_version" class="ext-note">
 						Declared host range {{ item.host_version }} (often outdated — update still allowed).
@@ -611,6 +627,10 @@ const updateTargets = computed(() => {
 });
 
 const corruptNames = computed(() => visibleCorruptItems.value.map((item) => item.name));
+
+function showDisabledChip(item: ExtensionUpdateItem) {
+	return !item.enabled && !item.replaced_by_local_version && !item.files_missing && !item.installed_blocked_reason;
+}
 
 function formatType(type: string) {
 	return type.charAt(0).toUpperCase() + type.slice(1);

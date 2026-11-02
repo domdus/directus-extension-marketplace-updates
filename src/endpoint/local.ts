@@ -395,7 +395,7 @@ export async function prepareUpload(options: {
 	filename: string;
 	replace: boolean;
 }): Promise<UploadPlan> {
-	const parsed = parseExtensionArchive(options.buffer, options.filename);
+	const parsed = await parseExtensionArchive(options.buffer, options.filename);
 	const name = parsed.manifest.name;
 	if (!name) {
 		throw Object.assign(new Error('Uploaded package.json is missing name'), { status: 400 });
