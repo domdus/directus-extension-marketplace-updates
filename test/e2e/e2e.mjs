@@ -53,5 +53,16 @@ const good=gzipSync(Buffer.concat([tar('package/package.json',Buffer.from(pkg)),
 const g=await ul(good,'g.tgz');ok('mu: valid package accepted',g.s==202,g);
 for(let i=0;i<60;i++){await new Promise(r=>setTimeout(r,1000));if((await j('GET','/users/me?fields=id')).s==200)break}
 
+// version locks
+const list=(await j('GET','/extension-updates/check?force=1')).d.data.items;
+const self=list.find(i=>i.source==='local'&&i.current_version!=='unknown');
+const lockOn=await j('POST','/extension-updates/lock',{extension:self.id,version:self.current_version});ok('mu: lock accepted',lockOn.s==200,lockOn);
+const stored=await j('GET','/fields/directus_settings/extension_update_locks');ok('mu: lock field created',stored.s==200&&stored.d.data.meta.hidden===true,stored);
+const after=(await j('GET','/extension-updates/check')).d.data.items.find(i=>i.id===self.id);ok('mu: locked version reported without an update',after.version_locked===true&&after.has_update===false,after);
+ok('mu: bad lock request rejected',(await j('POST','/extension-updates/lock',{extension:self.id})).s==400);
+const anon=await j('POST','/extension-updates/lock',{extension:self.id,version:null},{},null);ok('mu: anonymous lock refused',anon.s==403,anon);
+const lockOff=await j('POST','/extension-updates/lock',{extension:self.id,version:null});ok('mu: unlock accepted',lockOff.s==200,lockOff);
+const freed=(await j('GET','/extension-updates/check')).d.data.items.find(i=>i.id===self.id);ok('mu: unlocked version reported normally',!freed.version_locked,freed);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

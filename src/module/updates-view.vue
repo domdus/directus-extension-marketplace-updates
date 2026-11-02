@@ -125,6 +125,7 @@
 						<v-chip v-else-if="item.replaced_by_local_version" small class="type-chip">
 							Replaced by local {{ item.replaced_by_local_version }}
 						</v-chip>
+						<v-chip v-else-if="item.version_locked" small class="type-chip">Locked</v-chip>
 						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
@@ -162,6 +163,9 @@
 					<p v-else-if="item.replaced_by_local_version" class="ext-note">
 						This Marketplace copy is disabled and local {{ item.replaced_by_local_version }} runs instead, so
 						it needs no update. Uninstall it in the Marketplace to remove this row.
+					</p>
+					<p v-else-if="item.version_locked" class="ext-note">
+						Update notices are off for {{ item.current_version }}. Unlock it to see updates again.
 					</p>
 					<p v-else-if="item.latest_blocked_reason" class="ext-note">
 						Latest {{ item.latest_version }} is corrupt on the Marketplace. Your installed version is fine —
@@ -212,6 +216,19 @@
 						@click="openVersionPicker(item)"
 					>
 						Choose Version
+					</v-button>
+					<v-button
+						v-if="canLock(item)"
+						v-tooltip="item.version_locked ? 'Unlock version' : 'Lock this version'"
+						class="marketplace-icon"
+						icon
+						small
+						secondary
+						:loading="lockingId === item.id"
+						:disabled="checking || updatingAll || uploading || Boolean(applyingId) || Boolean(lockingId)"
+						@click="toggleLock(item)"
+					>
+						<v-icon :name="item.version_locked ? 'lock' : 'lock_open'" />
 					</v-button>
 					<v-button
 						v-if="item.marketplace_path"
@@ -555,6 +572,7 @@ const serverStore = useServerStore();
 
 const checking = ref(false);
 const applyingId = ref<string | null>(null);
+const lockingId = ref<string | null>(null);
 const updatingAll = ref(false);
 const uploading = ref(false);
 const cancelAllRequested = ref(false);
@@ -627,6 +645,27 @@ const updateTargets = computed(() => {
 });
 
 const corruptNames = computed(() => visibleCorruptItems.value.map((item) => item.name));
+
+function canLock(item: ExtensionUpdateItem) {
+	const onMarketplace = item.source === 'registry' || Boolean(item.marketplace_id);
+	return onMarketplace && !item.replaced_by_local_version && !item.files_missing && item.current_version !== 'unknown';
+}
+
+async function toggleLock(item: ExtensionUpdateItem) {
+	lockingId.value = item.id;
+	errorMessage.value = null;
+	try {
+		await api.post('/extension-updates/lock', {
+			extension: item.id,
+			version: item.version_locked ? null : item.current_version,
+		});
+		await load();
+	} catch (error: unknown) {
+		errorMessage.value = apiErrorMessage(error, 'Could not change the version lock');
+	} finally {
+		lockingId.value = null;
+	}
+}
 
 function showDisabledChip(item: ExtensionUpdateItem) {
 	return !item.enabled && !item.replaced_by_local_version && !item.files_missing && !item.installed_blocked_reason;

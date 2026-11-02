@@ -40,6 +40,8 @@ export type ExtensionUpdateItem = {
 	replaced_by_local_version?: string;
 	/** This Marketplace copy is enabled alongside a local copy of this version, so both run. */
 	duplicate_local_version?: string;
+	/** Installed version is locked, so update notices are off. */
+	version_locked?: boolean;
 	/** Real failures (lookup/read). Not used when only the newest Marketplace release is corrupt. */
 	error?: string;
 	/**
