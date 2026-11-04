@@ -125,7 +125,7 @@
 						<v-chip v-else-if="item.replaced_by_local_version" small class="type-chip">
 							Replaced by local {{ item.replaced_by_local_version }}
 						</v-chip>
-						<v-chip v-else-if="item.version_locked" small class="type-chip">Locked</v-chip>
+						<v-chip v-else-if="item.version_locked" small class="state locked">Locked</v-chip>
 						<v-chip v-else-if="item.has_update" small class="state warning">Update</v-chip>
 						<v-chip v-else-if="item.error" small class="state">Error</v-chip>
 						<v-chip v-else-if="item.latest_blocked_reason" small class="state">Update blocked</v-chip>
@@ -1366,6 +1366,12 @@ onMounted(() => {
 .state.enabled {
 	--v-chip-color: var(--theme--success);
 	--v-chip-background-color: var(--theme--success-background);
+}
+
+.state.locked {
+	--v-chip-color: #2f80ed;
+	--v-chip-background-color: rgba(47, 128, 237, 0.15);
+	--v-chip-border-color: transparent;
 }
 
 .state.warning {
